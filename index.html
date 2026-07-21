@@ -16,7 +16,7 @@
   .wrap{width:100%;max-width:860px}
   .wrap h1{font-size:22px;margin:0 0 6px;text-align:center}
   .wrap .sub{color:var(--muted);text-align:center;margin:0 0 28px;font-size:14px}
-  .grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:20px}
   @media(max-width:640px){ .grid{grid-template-columns:1fr} }
   .tile{display:flex;flex-direction:column;gap:10px;background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:28px 24px;text-decoration:none;color:var(--text);transition:.15s}
   .tile:hover{border-color:var(--accent);background:var(--panel2);transform:translateY(-2px)}
@@ -48,6 +48,12 @@
         <div class="ico">🏷️</div>
         <div class="name">Etikettendruck</div>
         <div class="desc">MV-Etiketten (Code 128) zusammenstellen und drucken – per Suche, MV-Codes einfügen oder aus der Warteschlange.</div>
+        <div class="go">Öffnen →</div>
+      </a>
+      <a class="tile" href="wareneingang.html">
+        <div class="ico">📥</div>
+        <div class="name">Wareneingang</div>
+        <div class="desc">Lieferschein abfotografieren, per KI auslesen und mit dem Stamm abgleichen: was ist bekannt (MV-Nr.), was ist neu.</div>
         <div class="go">Öffnen →</div>
       </a>
     </div>

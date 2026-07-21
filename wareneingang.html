@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MV-Wareneingang</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  :root{ --bg:#0f172a;--panel:#1e293b;--panel2:#273449;--line:#334155;--line2:#3f4d63;--text:#e2e8f0;--muted:#94a3b8;--accent:#3b82f6;--accent2:#2563eb;--ok:#22c55e;--warn:#f59e0b;--bad:#ef4444;--chip:#0b1220; }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-size:15px}
+  header{position:sticky;top:0;z-index:20;background:#0b1220;border-bottom:1px solid var(--line);padding:10px 14px;display:flex;align-items:center;gap:10px;justify-content:space-between}
+  header .brand{display:flex;align-items:center;gap:9px;font-weight:700}
+  header .logo{background:var(--accent);color:#fff;border-radius:6px;padding:4px 8px;font-size:12px}
+  header small{display:block;color:var(--muted);font-weight:500;font-size:11px}
+  header a.back{color:var(--muted);text-decoration:none;font-size:13px;border:1px solid var(--line2);border-radius:8px;padding:6px 10px}
+  main{max-width:720px;margin:0 auto;padding:14px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:14px}
+  .card h2{margin:0 0 4px;font-size:15px}
+  .sub{color:var(--muted);font-size:12.5px;margin-bottom:10px}
+  label{display:block;font-size:12px;color:var(--muted);margin-bottom:4px}
+  input[type=text],input[type=password]{width:100%;background:var(--chip);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:10px;font-size:14px}
+  .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;background:var(--accent);color:#fff;border:none;border-radius:10px;padding:13px 18px;font-size:15px;font-weight:600;cursor:pointer;width:100%}
+  .btn:hover{background:var(--accent2)} .btn:disabled{opacity:.5}
+  .btn.secondary{background:var(--panel2);border:1px solid var(--line2)}
+  .dot{width:9px;height:9px;border-radius:50%;display:inline-block;margin-right:5px}
+  .dot.on{background:var(--ok)}.dot.off{background:var(--warn)}.dot.err{background:var(--bad)}
+  .status{font-size:12px;color:var(--muted)}
+  .muted{color:var(--muted)} .small{font-size:12px}
+  .thumbs{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+  .thumbs img{height:64px;border-radius:8px;border:1px solid var(--line2)}
+  .summary{display:flex;gap:8px;flex-wrap:wrap;margin:4px 0 12px}
+  .stat{flex:1;min-width:90px;background:var(--chip);border:1px solid var(--line);border-radius:10px;padding:8px 12px;text-align:center}
+  .stat b{display:block;font-size:22px}
+  .pos{background:var(--chip);border:1px solid var(--line);border-left-width:4px;border-radius:10px;padding:11px 12px;margin-bottom:9px}
+  .pos.ok{border-left-color:var(--ok)} .pos.neu{border-left-color:var(--bad)} .pos.pruef{border-left-color:var(--warn)}
+  .pos .top{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}
+  .pos .bez{font-weight:600;line-height:1.25}
+  .pos .meta{color:var(--muted);font-size:12px;margin-top:3px}
+  .badge{font-size:11px;font-weight:700;padding:3px 9px;border-radius:999px;white-space:nowrap}
+  .badge.ok{background:rgba(34,197,94,.16);color:#4ade80}
+  .badge.neu{background:rgba(239,68,68,.16);color:#f87171}
+  .badge.pruef{background:rgba(245,158,11,.16);color:#fbbf24}
+  .lief{font-weight:600}
+  .spin{width:16px;height:16px;border:2px solid var(--line2);border-top-color:#fff;border-radius:50%;display:inline-block;animation:sp .7s linear infinite;vertical-align:middle}
+  @keyframes sp{to{transform:rotate(360deg)}}
+  .toast{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);background:#111827;border:1px solid var(--line2);color:#fff;padding:10px 15px;border-radius:9px;font-size:13px;z-index:50;max-width:92vw}
+  .toast.bad{border-color:var(--bad)}
+  .hidden{display:none}
+  details summary{cursor:pointer;color:var(--muted);font-size:12px}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand"><span class="logo">MV</span><div>Wareneingang<small>Lieferschein → Abgleich</small></div></div>
+  <a class="back" href="index.html">← Start</a>
+</header>
+
+<main>
+  <div class="card">
+    <div class="status"><span id="dotSb" class="dot off"></span><span id="sbTxt">Stamm lädt…</span></div>
+    <details style="margin-top:8px">
+      <summary>Claude-API-Key (für die Foto-Auslesung)</summary>
+      <div style="margin-top:8px;display:flex;gap:8px">
+        <input id="apiKey" type="password" placeholder="sk-ant-… (einmalig, bleibt gespeichert)" autocomplete="off">
+        <button class="btn secondary" id="toggleKey" type="button" style="width:auto;padding:10px 12px">👁</button>
+      </div>
+    </details>
+  </div>
+
+  <div class="card">
+    <h2>1 · Lieferschein aufnehmen</h2>
+    <div class="sub">Foto machen (auch mehrere Seiten) oder aus der Galerie/PDF wählen — dann auslesen.</div>
+    <button class="btn" id="camBtn" type="button">📷 Lieferschein fotografieren / wählen</button>
+    <input id="fileInput" type="file" accept="image/*,application/pdf" capture="environment" multiple class="hidden">
+    <div id="thumbs" class="thumbs"></div>
+    <div id="go" style="margin-top:12px"></div>
+  </div>
+
+  <div class="card hidden" id="resultCard">
+    <h2>2 · Abgleich mit dem Stamm</h2>
+    <div id="liefLine" class="sub"></div>
+    <div class="summary" id="summary"></div>
+    <div id="positions"></div>
+    <div class="small muted" style="margin-top:6px">✅ = schon im Stamm (MV-Nr.) · 🆕 = neu (anlegen) · ⚠️ = gleiche Nr., anderer Lieferant (prüfen)</div>
+  </div>
+</main>
+
+<script>
+const SUPABASE_URL="https://vmxucwenjpwrjpeqcuhc.supabase.co";
+const SUPABASE_KEY="sb_publishable_bKycBdawzkSItE7G0YVamQ_ikkJMm0j";
+const CLAUDE_MODEL="claude-sonnet-5";
+const db=window.supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
+const $=(id)=>document.getElementById(id);
+function esc(v){return String(v==null?"":v).replace(/[&<>"]/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[m]))}
+function toast(m,bad){const t=document.createElement("div");t.className="toast"+(bad?" bad":"");t.textContent=m;document.body.appendChild(t);setTimeout(()=>t.remove(),bad?5200:2600)}
+function norm(v){return String(v==null?"":v).replace(/\s+/g," ").trim().toLowerCase()}
+function clean(v){let s=String(v==null?"":v).replace(/\s+/g," ").trim();return (s==="k.A."||s==="-")?"":s}
+function normLief(v){let s=norm(v).replace(/[.,&/]/g," ");s=s.replace(/\b(gmbh|mbh|co|kg|kgaa|ag|ohg|ug|se|gbr|ek|e\s+k|inh|inhaber|fa|firma)\b/g," ");return s.replace(/\s+/g," ").trim()}
+
+/* ---- Key ---- */
+function safeGet(k){try{return localStorage.getItem(k)}catch(e){return null}}
+function safeSet(k,v){try{localStorage.setItem(k,v)}catch(e){}}
+$("apiKey").value=safeGet("anthropic_api_key")||"";
+$("apiKey").addEventListener("input",()=>safeSet("anthropic_api_key",$("apiKey").value.trim()));
+$("toggleKey").addEventListener("click",()=>{const i=$("apiKey");i.type=i.type==="password"?"text":"password"});
+
+/* ---- Stamm laden ---- */
+let STAMM={byArtNr:new Map(),keyHerst:new Set(),loaded:false};
+async function loadStamm(){
+  try{
+    let all=[],from=0,page=1000;
+    while(true){
+      const {data,error}=await db.from("artikel").select("mv_nr,mv_code,art_nr_lieferant,art_nr_hersteller,lieferant,bezeichnung,lagerort,etikettiert,etikett_typ").order("mv_nr",{ascending:true}).range(from,from+page-1);
+      if(error) throw error;
+      all=all.concat(data||[]);
+      if(!data||data.length<page) break; from+=page;
+    }
+    STAMM.byArtNr=new Map(); STAMM.keyHerst=new Set();
+    for(const r of all){
+      const na=norm(r.art_nr_lieferant);
+      if(na){ if(!STAMM.byArtNr.has(na)) STAMM.byArtNr.set(na,[]); STAMM.byArtNr.get(na).push(r); }
+      const kh=norm(r.art_nr_hersteller); if(kh&&kh!=="-") STAMM.keyHerst.add(kh);
+    }
+    STAMM.loaded=true; $("dotSb").className="dot on"; $("sbTxt").textContent=all.length+" Artikel im Stamm geladen";
+  }catch(e){ $("dotSb").className="dot err"; $("sbTxt").textContent="Stamm-Fehler: "+(e.message||e); }
+}
+
+/* ---- Foto/Datei-Auswahl ---- */
+let FILES=[];
+$("camBtn").addEventListener("click",()=>$("fileInput").click());
+$("fileInput").addEventListener("change",e=>{ for(const f of e.target.files) FILES.push(f); e.target.value=""; renderThumbs(); });
+function renderThumbs(){
+  $("thumbs").innerHTML=FILES.map((f,i)=>{
+    if(/pdf$/i.test(f.type)||/\.pdf$/i.test(f.name)) return '<div class="thumbs" style="height:64px;display:flex;align-items:center;padding:0 10px;border:1px solid var(--line2);border-radius:8px">📄 PDF</div>';
+    return '<img src="'+URL.createObjectURL(f)+'" alt="">';
+  }).join("");
+  $("go").innerHTML = FILES.length ? '<button class="btn" id="readBtn" type="button">🔍 '+FILES.length+' Seite(n) auslesen &amp; abgleichen</button> <button class="btn secondary" id="clearBtn" type="button" style="margin-top:8px">Zurücksetzen</button>' : '';
+  if($("readBtn")) $("readBtn").addEventListener("click",runExtract);
+  if($("clearBtn")) $("clearBtn").addEventListener("click",()=>{FILES=[];renderThumbs();$("resultCard").classList.add("hidden");});
+}
+
+/* ---- Bild verkleinern (Handyfotos) ---- */
+function fileToContent(f){
+  return new Promise((resolve,reject)=>{
+    if(/pdf$/i.test(f.type)||/\.pdf$/i.test(f.name)){
+      const r=new FileReader(); r.onload=()=>resolve({type:"document",source:{type:"base64",media_type:"application/pdf",data:String(r.result).split(",")[1]}}); r.onerror=reject; r.readAsDataURL(f); return;
+    }
+    const img=new Image();
+    img.onload=()=>{
+      const max=1600; let w=img.width,h=img.height;
+      if(Math.max(w,h)>max){ const s=max/Math.max(w,h); w=Math.round(w*s); h=Math.round(h*s); }
+      const c=document.createElement("canvas"); c.width=w; c.height=h;
+      c.getContext("2d").drawImage(img,0,0,w,h);
+      const durl=c.toDataURL("image/jpeg",0.85);
+      resolve({type:"image",source:{type:"base64",media_type:"image/jpeg",data:durl.split(",")[1]}});
+    };
+    img.onerror=reject; img.src=URL.createObjectURL(f);
+  });
+}
+
+/* ---- Claude-Extraktion ---- */
+const SCHEMA={type:"object",properties:{
+  sender:{type:"string",description:"Lieferant/Absender des Lieferscheins, sonst 'k.A.'"},
+  items:{type:"array",items:{type:"object",properties:{
+    artikelNummer:{type:"string",description:"Artikel-/Bestellnummer des Lieferanten für diese Position, sonst 'k.A.'"},
+    bezeichnung:{type:"string",description:"Bezeichnung des Artikels"},
+    menge:{type:"string",description:"gelieferte Menge inkl. Einheit, sonst ''"}
+  },required:["bezeichnung"],additionalProperties:false}}
+},required:["sender","items"],additionalProperties:false};
+
+async function extract(apiKey){
+  const content=[];
+  for(const f of FILES){ content.push(await fileToContent(f)); }
+  content.push({type:"text",text:"Dies ist ein Lieferschein (evtl. mehrere Seiten/Fotos). Extrahiere den Lieferanten/Absender und ALLE Warenpositionen mit Artikelnummer des Lieferanten (falls vorhanden, sonst 'k.A.'), Bezeichnung und gelieferter Menge. Ignoriere Versand, Porto, Gebühren, Zwischensummen und Kopf-/Fußzeilen. Nur echte Warenpositionen."});
+  const body={model:CLAUDE_MODEL,max_tokens:8000,
+    system:"Du bist ein präziser Assistent für Lieferschein-Extraktion. Antworte ausschließlich mit dem geforderten JSON.",
+    messages:[{role:"user",content}], output_config:{format:{type:"json_schema",schema:SCHEMA}}};
+  let resp;
+  try{ resp=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",
+    headers:{"content-type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
+    body:JSON.stringify(body)}); }
+  catch(e){ throw new Error("Netzwerkfehler beim Claude-Aufruf."); }
+  const json=await resp.json().catch(()=>null);
+  if(!resp.ok){ const msg=(json&&json.error&&json.error.message)||("HTTP "+resp.status);
+    if(resp.status===401) throw new Error("Ungültiger API-Key (sk-ant-…).");
+    if(resp.status===400&&/credit|balance|billing/i.test(msg)) throw new Error("Kein Guthaben auf dem Anthropic-Konto.");
+    if(resp.status===429) throw new Error("Rate Limit – kurz warten.");
+    if(resp.status===529||/overloaded/i.test(msg)) throw new Error("Claude überlastet – gleich erneut.");
+    throw new Error(msg); }
+  const parts=(json&&Array.isArray(json.content))?json.content:[];
+  let text=parts.filter(b=>b.type==="text").map(b=>b.text||"").join("").trim();
+  if(!text) throw new Error("Keine Antwort von Claude.");
+  if(text.includes("```")){ const m=text.match(/```(?:json)?\s*([\s\S]*?)\s*```/); if(m&&m[1]) text=m[1].trim(); }
+  return JSON.parse(text);
+}
+
+async function runExtract(){
+  const apiKey=$("apiKey").value.trim();
+  if(!apiKey){ toast("Bitte Claude-API-Key eintragen (oben aufklappen).",true); return; }
+  if(!STAMM.loaded){ toast("Stamm noch nicht geladen – kurz warten.",true); return; }
+  const btn=$("readBtn"); btn.disabled=true; btn.innerHTML='<span class="spin"></span> lese aus…';
+  try{
+    const data=await extract(apiKey);
+    match(data);
+  }catch(e){ toast("Fehler: "+(e.message||e),true); }
+  if($("readBtn")){ $("readBtn").disabled=false; $("readBtn").innerHTML='🔍 erneut auslesen'; }
+}
+
+/* ---- Abgleich ---- */
+function match(data){
+  const senderTl=normLief(data.sender);
+  const items=(data.items||[]).filter(it=>clean(it.bezeichnung));
+  const rows=items.map(it=>{
+    const na=norm(it.artikelNummer);
+    let status="neu", art=null, note="";
+    if(na && STAMM.byArtNr.has(na)){
+      const hits=STAMM.byArtNr.get(na);
+      const same=hits.find(h=>normLief(h.lieferant)===senderTl);
+      if(same){ status="ok"; art=same; }
+      else { status="pruef"; art=hits[0]; note="gleiche Art.nr. bei "+hits.map(h=>h.lieferant).join(", "); }
+    } else if(na && STAMM.keyHerst.has(na)){ status="pruef"; note="Nr. als Hersteller-Nr. im Stamm"; }
+    else if(!clean(it.artikelNummer)){ status="neu"; note="keine Artikelnummer erkannt"; }
+    return {it,status,art,note};
+  });
+  render(data.sender, rows);
+}
+function render(sender, rows){
+  const nOk=rows.filter(r=>r.status==="ok").length, nNeu=rows.filter(r=>r.status==="neu").length, nP=rows.filter(r=>r.status==="pruef").length;
+  $("liefLine").innerHTML="Lieferant lt. Lieferschein: <span class='lief'>"+esc(sender||"—")+"</span> · "+rows.length+" Positionen";
+  $("summary").innerHTML=
+    '<div class="stat"><b style="color:#4ade80">'+nOk+'</b><span class="small muted">im Stamm</span></div>'+
+    '<div class="stat"><b style="color:#f87171">'+nNeu+'</b><span class="small muted">neu</span></div>'+
+    (nP?'<div class="stat"><b style="color:#fbbf24">'+nP+'</b><span class="small muted">prüfen</span></div>':'');
+  $("positions").innerHTML=rows.map(r=>{
+    const cls=r.status==="ok"?"ok":(r.status==="pruef"?"pruef":"neu");
+    const badge=r.status==="ok"?'<span class="badge ok">✅ '+esc(r.art.mv_code)+'</span>':
+                r.status==="pruef"?'<span class="badge pruef">⚠️ prüfen</span>':'<span class="badge neu">🆕 neu</span>';
+    let meta=[];
+    if(r.it.artikelNummer&&clean(r.it.artikelNummer)) meta.push("Art.nr.: "+esc(clean(r.it.artikelNummer)));
+    if(clean(r.it.menge)) meta.push("Menge: "+esc(clean(r.it.menge)));
+    if(r.status==="ok"&&r.art.lagerort) meta.push("Lager: "+esc(r.art.lagerort));
+    if(r.status==="ok") meta.push(r.art.etikettiert?"etikettiert ✓":"noch nicht etikettiert");
+    if(r.note) meta.push(esc(r.note));
+    return '<div class="pos '+cls+'"><div class="top"><div class="bez">'+esc(clean(r.it.bezeichnung))+'</div>'+badge+'</div>'+
+      (meta.length?'<div class="meta">'+meta.join(" · ")+'</div>':'')+'</div>';
+  }).join("");
+  $("resultCard").classList.remove("hidden");
+  $("resultCard").scrollIntoView({behavior:"smooth"});
+}
+
+loadStamm();
+</script>
+</body>
+</html>
