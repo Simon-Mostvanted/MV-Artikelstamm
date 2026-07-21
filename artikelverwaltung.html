@@ -1,0 +1,757 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MV-Artikelmanager</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<style>
+  :root{
+    --bg:#0f172a; --panel:#1e293b; --panel2:#273449; --line:#334155; --line2:#3f4d63;
+    --text:#e2e8f0; --muted:#94a3b8; --accent:#3b82f6; --accent2:#2563eb;
+    --ok:#22c55e; --warn:#f59e0b; --bad:#ef4444; --chip:#0b1220;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-size:14px;line-height:1.5}
+  a{color:var(--accent)}
+  header{position:sticky;top:0;z-index:20;background:#0b1220;border-bottom:1px solid var(--line);padding:10px 16px;display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between}
+  .brand{display:flex;align-items:center;gap:10px;font-weight:700}
+  .brand .logo{background:var(--accent);color:#fff;border-radius:6px;padding:4px 8px;font-size:12px;letter-spacing:.5px}
+  .brand small{display:block;color:var(--muted);font-weight:500;font-size:11px}
+  .status{display:flex;align-items:center;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--muted)}
+  .dot{width:9px;height:9px;border-radius:50%;display:inline-block;margin-right:5px;vertical-align:middle}
+  .dot.on{background:var(--ok)} .dot.off{background:var(--warn)} .dot.err{background:var(--bad)}
+  main{max-width:1200px;margin:0 auto;padding:18px 16px 80px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px;margin-bottom:16px}
+  .card h2{margin:0 0 4px;font-size:15px;display:flex;align-items:center;gap:8px}
+  .card .sub{color:var(--muted);font-size:12px;margin-bottom:14px}
+  .step-no{background:var(--accent);color:#fff;border-radius:50%;width:22px;height:22px;display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:700}
+  label{display:block;font-size:12px;color:var(--muted);margin-bottom:4px}
+  input[type=text],input[type=password],select,textarea{width:100%;background:var(--chip);border:1px solid var(--line);color:var(--text);border-radius:7px;padding:8px 10px;font-size:13px;font-family:inherit}
+  input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent)}
+  .btn{background:var(--accent);color:#fff;border:none;border-radius:8px;padding:9px 16px;font-size:13px;font-weight:600;cursor:pointer}
+  .btn:hover{background:var(--accent2)} .btn:disabled{opacity:.45;cursor:not-allowed}
+  .btn.secondary{background:var(--panel2);border:1px solid var(--line2);color:var(--text)}
+  .btn.ghost{background:transparent;border:1px solid var(--line2);color:var(--muted)}
+  .btn.ok{background:var(--ok)} .btn.ok:hover{filter:brightness(1.08)}
+  .row{display:flex;gap:12px;flex-wrap:wrap;align-items:end}
+  .dropzone{border:2px dashed var(--line2);border-radius:10px;padding:26px;text-align:center;color:var(--muted);cursor:pointer;transition:.15s}
+  .dropzone.drag,.dropzone:hover{border-color:var(--accent);background:rgba(59,130,246,.06);color:var(--text)}
+  .muted{color:var(--muted)} .small{font-size:12px}
+  .pill{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:600}
+  .pill.neu{background:rgba(34,197,94,.15);color:#4ade80}
+  .pill.dup{background:rgba(245,158,11,.15);color:#fbbf24}
+  .pill.bad{background:rgba(239,68,68,.15);color:#f87171}
+  .tablewrap{overflow-x:auto;border:1px solid var(--line);border-radius:8px}
+  table{border-collapse:collapse;width:100%;font-size:12.5px;white-space:nowrap}
+  th,td{border-bottom:1px solid var(--line);padding:6px 8px;text-align:left;vertical-align:middle}
+  th{background:var(--panel2);color:var(--muted);font-weight:600;position:sticky;top:0}
+  td input,td select{padding:5px 7px;font-size:12px;min-width:90px}
+  td input.w-sm{min-width:70px} td input.w-lg{min-width:200px}
+  .flist{margin-top:12px;display:flex;flex-direction:column;gap:6px}
+  .frow{display:flex;align-items:center;gap:10px;background:var(--chip);border:1px solid var(--line);border-radius:7px;padding:7px 10px;font-size:12px}
+  .frow .fn{flex:1;overflow:hidden;text-overflow:ellipsis}
+  .spin{width:15px;height:15px;border:2px solid var(--line2);border-top-color:var(--accent);border-radius:50%;display:inline-block;animation:sp .7s linear infinite}
+  @keyframes sp{to{transform:rotate(360deg)}}
+  .toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);background:#111827;border:1px solid var(--line2);color:#fff;padding:10px 16px;border-radius:8px;font-size:13px;z-index:50;box-shadow:0 8px 30px rgba(0,0,0,.5);max-width:90vw}
+  .toast.bad{border-color:var(--bad)}
+  .summary{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+  .stat{background:var(--chip);border:1px solid var(--line);border-radius:8px;padding:8px 14px;min-width:96px}
+  .stat b{font-size:20px;display:block}
+  .hidden{display:none}
+  .hint{background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.3);border-radius:8px;padding:10px 12px;font-size:12.5px;color:#fcd9a1}
+  details summary{cursor:pointer;color:var(--muted);font-size:12px;margin-top:8px}
+  code{background:var(--chip);padding:1px 5px;border-radius:4px;font-size:12px}
+</style>
+</head>
+<body>
+<div id="pinGate" style="position:fixed;inset:0;z-index:1000;background:#0f172a;display:flex;align-items:center;justify-content:center;font-family:system-ui,Segoe UI,Roboto,sans-serif">
+  <div style="background:#1e293b;border:1px solid #334155;border-radius:14px;padding:28px;max-width:340px;width:90%;text-align:center;color:#e2e8f0">
+    <div style="font-size:34px;margin-bottom:8px">&#128274;</div>
+    <div style="font-weight:700;font-size:17px">Artikelverwaltung</div>
+    <div style="color:#94a3b8;font-size:13px;margin:4px 0 16px">Bitte PIN eingeben.</div>
+    <input id="pinInput" type="password" inputmode="numeric" placeholder="PIN" autofocus style="width:100%;text-align:center;font-size:18px;letter-spacing:3px;padding:10px;background:#0b1220;border:1px solid #334155;color:#e2e8f0;border-radius:8px">
+    <div id="pinErr" style="color:#ef4444;font-size:12px;height:16px;margin-top:6px"></div>
+    <button id="pinBtn" style="margin-top:8px;width:100%;background:#3b82f6;color:#fff;border:none;border-radius:8px;padding:11px;font-weight:600;cursor:pointer">&#214;ffnen</button>
+    <div style="margin-top:12px"><a href="index.html" style="color:#94a3b8;font-size:12px">&larr; Zur&uuml;ck zur Startseite</a></div>
+  </div>
+</div>
+<script>
+(function(){
+  var PIN = "2017"; /* === HIER deinen eigenen PIN eintragen === */
+  function unlock(){ var g=document.getElementById("pinGate"); if(g) g.style.display="none"; }
+  try{ if(sessionStorage.getItem("mv_admin_ok")==="1") unlock(); }catch(e){}
+  function check(){ var v=(document.getElementById("pinInput").value||"").trim();
+    if(v===PIN){ try{sessionStorage.setItem("mv_admin_ok","1")}catch(e){} unlock(); }
+    else { document.getElementById("pinErr").textContent="Falscher PIN."; document.getElementById("pinInput").value=""; } }
+  document.getElementById("pinBtn").addEventListener("click", check);
+  document.getElementById("pinInput").addEventListener("keydown", function(e){ if(e.key==="Enter") check(); });
+})();
+</script>
+<header>
+  <div class="brand">
+    <span class="logo">MV</span>
+    <div>MV-Artikelmanager<small>Anlegen aus Rechnung · manuell · bearbeiten</small></div>
+  </div>
+  <div class="status"><a href="index.html" class="btn ghost" style="text-decoration:none;padding:5px 11px;margin-right:8px">&larr; Start</a>
+    <span><span id="dotSb" class="dot off"></span><span id="sbTxt">Stamm nicht geladen</span></span>
+    <span><span id="dotKey" class="dot off"></span>Claude-Key</span>
+  </div>
+</header>
+
+<main>
+  <!-- CONFIG -->
+  <div class="card">
+    <h2><span class="step-no">0</span> Verbindung</h2>
+    <div class="sub">Der Anthropic-Key wird nur lokal in deinem Browser gespeichert (localStorage) und ausschließlich für die Rechnungs-Extraktion an Claude gesendet.</div>
+    <div class="row">
+      <div style="flex:1;min-width:280px">
+        <label>Anthropic (Claude) API-Key — für die Extraktion</label>
+        <div style="display:flex;gap:8px">
+          <input id="apiKey" type="password" placeholder="sk-ant-… hier einfügen" autocomplete="off">
+          <button class="btn ghost" id="toggleKey" type="button">anzeigen</button>
+        </div>
+      </div>
+      <button class="btn secondary" id="reloadStamm" type="button">Stamm aus Supabase laden</button>
+    </div>
+    <div id="stammInfo" class="small muted" style="margin-top:10px"></div>
+  </div>
+
+  <!-- MODE SWITCH -->
+  <div class="row" style="margin-bottom:16px;gap:8px">
+    <button class="btn" id="tabAnlegen" type="button">➕ Anlegen</button>
+    <button class="btn ghost" id="tabBearbeiten" type="button">✏️ Bearbeiten</button>
+  </div>
+
+  <div id="modeAnlegen">
+  <!-- STEP 1: CAPTURE -->
+  <div class="card">
+    <h2><span class="step-no">1</span> Artikel erfassen</h2>
+    <div class="sub">Rechnungen (PDF) per KI auslesen — oder eine fertige Excel/CSV-Liste hochladen. Beides sammelt sich in der Kandidatenliste.</div>
+    <div class="dropzone" id="pdfDrop">
+      <div style="font-size:15px;margin-bottom:4px">📄 PDF-Rechnung(en) hier ablegen</div>
+      <div class="small">oder klicken zum Auswählen · mehrere möglich</div>
+      <input id="pdfInput" type="file" accept="application/pdf" multiple class="hidden">
+    </div>
+    <div style="text-align:center;margin:12px 0;color:var(--muted);font-size:12px">— oder —</div>
+    <div class="row">
+      <button class="btn secondary" id="xlsxBtn" type="button">📊 Excel/CSV-Liste hochladen</button>
+      <input id="xlsxInput" type="file" accept=".xlsx,.xls,.csv" class="hidden">
+      <span class="small muted">Spalten werden automatisch anhand der Namen zugeordnet.</span>
+    </div>
+    <div style="text-align:center;margin:12px 0;color:var(--muted);font-size:12px">— oder —</div>
+    <details id="manualBox">
+      <summary style="cursor:pointer;font-weight:600">➕ Artikel manuell anlegen</summary>
+      <div style="margin-top:12px;display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div style="grid-column:1/-1"><label>Bezeichnung *</label><input id="m_bez" type="text" placeholder="Pflichtfeld"></div>
+        <div><label>Lieferant</label><input id="m_lief" type="text"></div>
+        <div><label>Art.nr. Lieferant</label><input id="m_anrl" type="text"></div>
+        <div><label>Hersteller</label><input id="m_herst" type="text"></div>
+        <div><label>Art.nr. Hersteller / EAN</label><input id="m_anrh" type="text"></div>
+        <div><label>Warengruppe</label><input id="m_wg" type="text"></div>
+        <div><label>Lagerort</label><input id="m_lo" type="text"></div>
+        <div><label>Lagerplatz</label><input id="m_lp" type="text"></div>
+        <div><label>Maß</label><input id="m_mass" type="text"></div>
+        <div><label>Farbe</label><input id="m_farbe" type="text"></div>
+        <div><label>VPE (Einheit)</label><input id="m_vpe" type="text" placeholder="z. B. Stk., lfm"></div>
+        <div><label>EK (exkl.)</label><input id="m_ek" type="text"></div>
+        <div><label>VK (inkl.)</label><input id="m_vk" type="text"></div>
+        <div><label>Bestellweg</label><input id="m_bweg" type="text" placeholder="z. B. Online-Shop, Würth"></div>
+        <div><label>Bestell-Mail</label><input id="m_mail" type="text" placeholder="bestellung@lieferant.de"></div>
+        <div style="grid-column:1/-1"><label>Online-Shop-Link / Produktlink</label><input id="m_link" type="text" placeholder="https://…"></div>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <button class="btn" id="manualAddBtn" type="button">Zur Erfassung hinzufügen</button>
+        <span class="small muted">Wird gegen den Stamm geprüft und bekommt beim Übernehmen automatisch eine MV-Nummer.</span>
+      </div>
+    </details>
+    <div id="fileList" class="flist"></div>
+    <div id="capCount" class="small" style="margin-top:12px"></div>
+    <div id="capPreview" class="tablewrap hidden" style="margin-top:10px;max-height:340px;overflow-y:auto"><table id="capTable"></table></div>
+  </div>
+
+  <!-- STEP 2: MATCH & ENRICH -->
+  <div class="card hidden" id="matchCard">
+    <h2><span class="step-no">2</span> Abgleich &amp; Ergänzen</h2>
+    <div class="sub">Neue Artikel werden gegen den Supabase-Stamm geprüft (Lieferant + Art.nr.Lieferant, sowie Art.nr.Hersteller). Ergänze die fehlenden Felder – dann übernehmen.</div>
+    <div class="summary" id="summary"></div>
+    <div class="row" style="margin-bottom:10px">
+      <div>
+        <label>Warengruppe für alle Neuen setzen</label>
+        <div style="display:flex;gap:6px">
+          <input id="bulkWg" type="text" placeholder="z. B. Verbrauchsmaterial">
+          <button class="btn ghost" id="bulkWgBtn" type="button">↧ übernehmen</button>
+        </div>
+      </div>
+      <div>
+        <label>Lagerort für alle Neuen setzen</label>
+        <div style="display:flex;gap:6px">
+          <input id="bulkLo" type="text" placeholder="z. B. Lager A">
+          <button class="btn ghost" id="bulkLoBtn" type="button">↧ übernehmen</button>
+        </div>
+      </div>
+    </div>
+    <div class="tablewrap"><table id="newTable"></table></div>
+    <details id="dupDetails"><summary>Übersprungene (Dubletten / ungültig) anzeigen</summary><div id="dupList" class="small" style="margin-top:8px"></div></details>
+  </div>
+
+  <!-- STEP 3: COMMIT -->
+  <div class="card hidden" id="commitCard">
+    <h2><span class="step-no">3</span> In Supabase übernehmen</h2>
+    <div class="sub">Beim Einfügen vergibt die Datenbank automatisch die nächste MV-Nummer (ab MV-12055). Bestehende Artikel werden nicht verändert.</div>
+    <div class="hint" id="policyHint">Voraussetzung: die INSERT-Berechtigung ist gesetzt. Falls das Übernehmen mit einem Rechte-Fehler abbricht, führe einmalig im Supabase SQL-Editor aus:
+      <code>create policy artikel_insert on public.artikel for insert with check (true);</code></div>
+    <div class="row" style="margin-top:12px">
+      <button class="btn ok" id="commitBtn" type="button">✓ <span id="commitLabel">Neue Artikel übernehmen</span></button>
+      <span id="commitInfo" class="small muted"></span>
+    </div>
+    <div id="resultWrap" class="hidden" style="margin-top:16px">
+      <div class="summary" id="resultSummary"></div>
+      <div class="tablewrap"><table id="resultTable"></table></div>
+      <button class="btn secondary" id="exportBtn" type="button" style="margin-top:12px">⬇ Ergebnis als CSV</button>
+    </div>
+  </div>
+  </div><!-- /modeAnlegen -->
+
+  <!-- MODE: BEARBEITEN -->
+  <div id="modeBearbeiten" class="hidden">
+    <div class="card">
+      <h2>Artikel bearbeiten</h2>
+      <div class="sub">Artikel suchen, auswählen und alle Felder anpassen. Die MV-Nummer ist fest und kann nicht geändert werden.</div>
+      <div class="row" style="margin-top:10px">
+        <input id="editSearch" type="text" placeholder="Suche: MV-Code, Bezeichnung, Art.nr. oder Lieferant …" style="flex:1;min-width:240px">
+        <button class="btn" id="editSearchBtn" type="button">Suchen</button>
+      </div>
+      <div id="editResults" style="margin-top:10px;display:flex;flex-direction:column;gap:5px;max-height:260px;overflow:auto"></div>
+    </div>
+
+    <div class="card hidden" id="editFormCard">
+      <h2>Bearbeiten: <span id="editMvCode" style="color:var(--accent)"></span></h2>
+      <div class="sub">Die MV-Nummer ist fest. Alle anderen Felder kannst du ändern (auch leere Felder füllen).</div>
+      <div id="editFields" style="display:grid;grid-template-columns:1fr 1fr;gap:10px"></div>
+      <div class="row" style="margin-top:14px">
+        <button class="btn ok" id="editSaveBtn" type="button">✓ Änderungen speichern</button>
+        <button class="btn ghost" id="editCancelBtn" type="button">Abbrechen</button>
+        <span id="editSaveInfo" class="small muted"></span>
+      </div>
+    </div>
+  </div>
+</main>
+
+<script>
+const SUPABASE_URL = "https://vmxucwenjpwrjpeqcuhc.supabase.co";
+const SUPABASE_KEY = "sb_publishable_bKycBdawzkSItE7G0YVamQ_ikkJMm0j";
+const CLAUDE_MODEL = "claude-sonnet-5";
+const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+const $ = (id) => document.getElementById(id);
+function toast(msg, bad){ const t=document.createElement("div"); t.className="toast"+(bad?" bad":""); t.textContent=msg; document.body.appendChild(t); setTimeout(()=>t.remove(), bad?5200:2600); }
+function esc(v){ return String(v==null?"":v).replace(/[&<>"]/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[m])); }
+function norm(v){ return String(v==null?"":v).replace(/\s+/g," ").trim().toLowerCase(); }
+function clean(v){ let s=String(v==null?"":v).replace(/\s+/g," ").trim(); return (s==="k.A."||s==="-")?"":s; }
+function parseNum(v){ if(v==null) return null; let s=String(v).trim(); if(s==="") return null;
+  s=s.replace(/[^\d.,-]/g,""); if(s==="") return null;
+  if(/,\d+$/.test(s)&&/\./.test(s)) s=s.replace(/\./g,"").replace(",","."); else s=s.replace(",",".");
+  const n=parseFloat(s); return isNaN(n)?null:n; }
+function isWuerth(lief){ return /w(ü|ue|u)rth/i.test(String(lief||"")); }
+/* Lieferantenname tolerant normalisieren: Rechtsformen/Interpunktion raus */
+function normLief(v){
+  let s = norm(v).replace(/[.,&/]/g," ");
+  s = s.replace(/\b(gmbh|mbh|co|kg|kgaa|ag|ohg|ug|se|gbr|ek|e\s+k|inh|inhaber|fa|firma)\b/g," ");
+  return s.replace(/\s+/g," ").trim();
+}
+
+/* ---------- Anthropic key ---------- */
+function safeGet(k){try{return localStorage.getItem(k)}catch(e){return null}}
+function safeSet(k,v){try{localStorage.setItem(k,v)}catch(e){}}
+$("apiKey").value = safeGet("anthropic_api_key") || "";
+function refreshKeyDot(){ $("dotKey").className = "dot "+($("apiKey").value.trim()?"on":"off"); }
+refreshKeyDot();
+$("apiKey").addEventListener("input", ()=>{ safeSet("anthropic_api_key", $("apiKey").value.trim()); refreshKeyDot(); });
+$("toggleKey").addEventListener("click", ()=>{ const i=$("apiKey"); i.type = i.type==="password"?"text":"password"; $("toggleKey").textContent = i.type==="password"?"anzeigen":"verbergen"; });
+
+/* ---------- State ---------- */
+let STAMM = { rows:[], keyLief:new Set(), keyHerst:new Set(), maxMv:0, loaded:false };
+let CANDIDATES = [];   // raw erfasste Artikel {bezeichnung, art_nr_lieferant, art_nr_hersteller, lieferant, hersteller, mass, farbe, vpe, ek_exkl, quelle}
+let NEWROWS = [];      // nach Abgleich, editierbar
+let SKIPPED = [];      // {c, grund}
+
+/* ---------- Stamm laden ---------- */
+async function loadStamm(){
+  $("dotSb").className="dot off"; $("sbTxt").textContent="lädt…";
+  try{
+    let all=[], from=0, page=1000;
+    while(true){
+      const { data, error } = await db.from("artikel")
+        .select("mv_nr,mv_code,art_nr_lieferant,art_nr_hersteller,lieferant,bezeichnung")
+        .order("mv_nr",{ascending:true}).range(from, from+page-1);
+      if(error) throw error;
+      all = all.concat(data||[]);
+      if(!data || data.length<page) break;
+      from += page;
+    }
+    STAMM.rows = all;
+    STAMM.byArtNr = new Map(); STAMM.keyHerst = new Set(); STAMM.maxMv=0;
+    for(const r of all){
+      const na = norm(r.art_nr_lieferant);
+      if(na){
+        if(!STAMM.byArtNr.has(na)) STAMM.byArtNr.set(na, []);
+        STAMM.byArtNr.get(na).push({ mv_code:r.mv_code, lieferant:r.lieferant });
+      }
+      const kh = norm(r.art_nr_hersteller);
+      if(kh && kh!=="-") STAMM.keyHerst.add(kh);
+      if(r.mv_nr>STAMM.maxMv) STAMM.maxMv=r.mv_nr;
+    }
+    STAMM.loaded=true;
+    $("dotSb").className="dot on";
+    $("sbTxt").textContent = all.length+" Artikel";
+    $("stammInfo").textContent = "Stamm geladen: "+all.length+" Artikel · höchste Nummer MV-"+STAMM.maxMv+" · neue MV-Nummern vergibt die Datenbank fortlaufend automatisch";
+  }catch(e){
+    STAMM.loaded=false; $("dotSb").className="dot err"; $("sbTxt").textContent="Fehler";
+    $("stammInfo").textContent="Stamm konnte nicht geladen werden: "+(e.message||e);
+    toast("Stamm laden fehlgeschlagen: "+(e.message||e), true);
+  }
+}
+$("reloadStamm").addEventListener("click", loadStamm);
+
+/* ---------- Datei-Erfassung: PDF ---------- */
+function readFileAsBase64(file){ return new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(String(r.result).split(",")[1]); r.onerror=rej; r.readAsDataURL(file); }); }
+
+const EXTRACT_SCHEMA = {
+  type:"object",
+  properties:{
+    sender:{type:"string",description:"Rechnungssteller/Lieferant, sonst 'k.A.'"},
+    artikel:{type:"array",items:{type:"object",properties:{
+      artikelNummer:{type:"string",description:"Artikel-/Bestellnummer des Lieferanten, sonst 'k.A.'"},
+      bezeichnung:{type:"string",description:"Bezeichnung des Artikels"},
+      preis:{type:"number",description:"Einzelpreis netto (Einkaufspreis)"},
+      herstellerNummer:{type:"string",description:"Hersteller-Artikelnummer oder EAN/GTIN, NUR wenn eindeutig vorhanden, sonst ''"},
+      hersteller:{type:"string",description:"Herstellername/Marke, NUR wenn eindeutig vorhanden, sonst ''"},
+      mass:{type:"string",description:"Maße/Abmessung/Größe (z. B. '9 mm', '7x10 cm'), NUR wenn vorhanden, sonst ''"},
+      farbe:{type:"string",description:"Farbe, NUR wenn vorhanden, sonst ''"}
+    },required:["artikelNummer","bezeichnung","preis"],additionalProperties:false}}
+  },
+  required:["sender","artikel"],additionalProperties:false
+};
+
+async function extractInvoice(base64, apiKey){
+  const promptText = `Extrahiere alle echten Artikel/Waren-Posten aus dieser Rechnung.
+IGNORIERE Versandkosten, Porto, Fracht, Verpackung, Bearbeitungs-/Servicegebühren, Pauschalen, Rabatte, Skonto, Gutschriften und negative Beträge – das sind KEINE Artikel.
+Nutze für jeden Posten: artikelNummer (Lieferantennummer, sonst 'k.A.'), bezeichnung, preis (Einzelpreis netto). Falls eindeutig erkennbar zusätzlich herstellerNummer/EAN, hersteller, mass, farbe – sonst leeren String.`;
+  const system = `Du bist ein hochpräziser Assistent für Rechnungsdaten-Extraktion. Extrahiere ausschließlich echte Waren/Kern-Dienstleistungen; niemals Gebühren, Pauschalen, Rabatte oder Gutschriften. Antworte ausschließlich mit dem geforderten JSON.`;
+  const body = { model:CLAUDE_MODEL, max_tokens:8000, system,
+    messages:[{role:"user",content:[
+      {type:"document",source:{type:"base64",media_type:"application/pdf",data:base64}},
+      {type:"text",text:promptText}
+    ]}],
+    output_config:{ format:{ type:"json_schema", schema:EXTRACT_SCHEMA } } };
+  let resp;
+  try{ resp = await fetch("https://api.anthropic.com/v1/messages",{ method:"POST",
+    headers:{ "content-type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true" },
+    body:JSON.stringify(body) }); }
+  catch(e){ throw new Error("Netzwerkfehler beim Claude-Aufruf. Internetverbindung prüfen."); }
+  const json = await resp.json().catch(()=>null);
+  if(!resp.ok){ const msg=(json&&json.error&&json.error.message)||("HTTP "+resp.status);
+    if(resp.status===401) throw new Error("Ungültiger API-Key (beginnt mit 'sk-ant-').");
+    if(resp.status===400 && /credit|balance|billing/i.test(msg)) throw new Error("Kein Guthaben auf dem Anthropic-Konto.");
+    if(resp.status===429) throw new Error("Rate Limit erreicht – kurz warten.");
+    if(resp.status===529||/overloaded/i.test(msg)) throw new Error("Claude momentan überlastet – gleich erneut.");
+    throw new Error(msg); }
+  if(json&&json.stop_reason==="refusal") throw new Error("Anfrage vom Modell abgelehnt.");
+  const parts = (json&&Array.isArray(json.content))?json.content:[];
+  let text = parts.filter(b=>b.type==="text").map(b=>b.text||"").join("");
+  if(!text) throw new Error("Keine Antwort von Claude.");
+  text=text.trim(); if(text.includes("```")){ const m=text.match(/```(?:json)?\s*([\s\S]*?)\s*```/); if(m&&m[1]) text=m[1].trim(); }
+  return JSON.parse(text);
+}
+
+const fileRows = {}; // fileId -> DOM
+function addFileRow(id,name){
+  const row=document.createElement("div"); row.className="frow"; row.id="fr-"+id;
+  row.innerHTML='<span class="spin"></span><span class="fn">'+name.replace(/</g,"&lt;")+'</span><span class="st muted">wird ausgelesen…</span>';
+  $("fileList").appendChild(row); fileRows[id]=row;
+}
+function setFileRow(id,ok,txt){
+  const row=fileRows[id]; if(!row) return;
+  row.querySelector(".spin").outerHTML = ok?'<span style="color:var(--ok)">✓</span>':'<span style="color:var(--bad)">✕</span>';
+  row.querySelector(".st").textContent = txt;
+}
+
+async function handlePdfs(files){
+  const apiKey=$("apiKey").value.trim();
+  if(!apiKey){ toast("Bitte zuerst den Claude API-Key oben eintragen.", true); return; }
+  for(const f of files){
+    const id = "f"+Date.now()+Math.floor(Math.random()*1e4);
+    addFileRow(id, f.name);
+    try{
+      const b64 = await readFileAsBase64(f);
+      const data = await extractInvoice(b64, apiKey);
+      const lief = clean(data.sender);
+      let n=0;
+      for(const a of (data.artikel||[])){
+        const bez=clean(a.bezeichnung); if(!bez) continue;
+        CANDIDATES.push({
+          bezeichnung:bez,
+          art_nr_lieferant:clean(a.artikelNummer),
+          art_nr_hersteller:clean(a.herstellerNummer),
+          hersteller:clean(a.hersteller),
+          lieferant:lief,
+          mass:clean(a.mass), farbe:clean(a.farbe),
+          vpe:"", ek_exkl:parseNum(a.preis),
+          quelle:f.name
+        });
+        n++;
+      }
+      setFileRow(id,true, n+" Artikel erkannt");
+    }catch(e){ setFileRow(id,false, e.message||String(e)); }
+  }
+  refreshCapture();
+}
+
+$("pdfDrop").addEventListener("click", ()=>$("pdfInput").click());
+$("pdfInput").addEventListener("change", e=>{ if(e.target.files.length) handlePdfs([...e.target.files]); e.target.value=""; });
+["dragover","dragenter"].forEach(ev=>$("pdfDrop").addEventListener(ev,e=>{e.preventDefault();$("pdfDrop").classList.add("drag");}));
+["dragleave","drop"].forEach(ev=>$("pdfDrop").addEventListener(ev,e=>{e.preventDefault();$("pdfDrop").classList.remove("drag");}));
+$("pdfDrop").addEventListener("drop", e=>{ const fs=[...e.dataTransfer.files].filter(f=>/pdf$/i.test(f.name)); if(fs.length) handlePdfs(fs); });
+
+/* ---------- Datei-Erfassung: Excel/CSV ---------- */
+const HEADER_ALIASES = {
+  bezeichnung:["bezeichnung","artikelbezeichnung","name","beschreibung","produktname"],
+  art_nr_lieferant:["art.nr.lieferant","artnrlieferant","art-nr lieferant","lieferantennr","lieferanten-nr","artikelnummer","artikelnr","artnr","sku","bestellnummer"],
+  art_nr_hersteller:["art.nr.hersteller","artnrhersteller","herstellernr","hersteller-nr","herstellernummer","ean","gtin"],
+  lieferant:["lieferant","sender","rechnungssteller"],
+  hersteller:["hersteller","marke","brand"],
+  warengruppe:["warengruppe","kategorie","gruppe"],
+  lagerort:["lagerort"], lagerplatz:["lagerplatz","platz"],
+  mass:["maß","mass","abmessung","größe","groesse"],
+  farbe:["farbe","color"], vpe:["vpe","verpackungseinheit","einheit"],
+  ek_exkl:["ek (exkl.)","ek","einkaufspreis","preis","ek exkl","ek netto"],
+  vk_inkl:["vk (inkl.)","vk","verkaufspreis"], gewicht_kg:["gewicht in kg","gewicht","gewicht kg"],
+  bestell_mail:["bestell-mail","bestellmail","email"], produktlink:["produktlink","link","url"]
+};
+function mapHeader(h){ const n=norm(h); for(const [field,al] of Object.entries(HEADER_ALIASES)){ if(al.some(x=>norm(x)===n)) return field; } return null; }
+$("xlsxBtn").addEventListener("click", ()=>$("xlsxInput").click());
+$("xlsxInput").addEventListener("change", e=>{ const f=e.target.files[0]; if(f) readXlsx(f); e.target.value=""; });
+
+/* ---------- Manuelle Anlage ---------- */
+const MANUAL_FIELDS = ["m_bez","m_lief","m_anrl","m_herst","m_anrh","m_wg","m_lo","m_lp","m_mass","m_farbe","m_vpe","m_ek","m_vk","m_bweg","m_mail","m_link"];
+$("manualAddBtn").addEventListener("click", ()=>{
+  const bez = clean($("m_bez").value);
+  if(!bez){ toast("Bitte eine Bezeichnung eingeben.", true); $("m_bez").focus(); return; }
+  CANDIDATES.push({
+    bezeichnung: bez,
+    art_nr_lieferant: clean($("m_anrl").value),
+    art_nr_hersteller: clean($("m_anrh").value),
+    hersteller: clean($("m_herst").value),
+    lieferant: clean($("m_lief").value),
+    warengruppe: clean($("m_wg").value),
+    lagerort: clean($("m_lo").value),
+    lagerplatz: clean($("m_lp").value),
+    mass: clean($("m_mass").value),
+    farbe: clean($("m_farbe").value),
+    vpe: clean($("m_vpe").value),
+    ek_exkl: parseNum($("m_ek").value),
+    vk_inkl: parseNum($("m_vk").value),
+    bestellweg: clean($("m_bweg").value),
+    bestell_mail: clean($("m_mail").value),
+    produktlink: clean($("m_link").value),
+    quelle: "manuell"
+  });
+  MANUAL_FIELDS.forEach(id=>$(id).value="");
+  $("m_bez").focus();
+  toast("Artikel zur Erfassung hinzugefügt.");
+  refreshCapture();
+});
+function readXlsx(file){
+  const rd=new FileReader();
+  rd.onload=(ev)=>{
+    try{
+      const wb=XLSX.read(new Uint8Array(ev.target.result),{type:"array"});
+      const ws=wb.Sheets[wb.SheetNames[0]];
+      const grid=XLSX.utils.sheet_to_json(ws,{header:1,defval:""});
+      if(!grid.length){ toast("Datei ist leer.",true); return; }
+      let hi=0; while(hi<grid.length && grid[hi].every(c=>String(c).trim()==="")) hi++;
+      const headers=grid[hi].map(String);
+      const map=headers.map(mapHeader);
+      const mappedFields=map.filter(Boolean);
+      if(!mappedFields.includes("bezeichnung")){ toast("Keine 'Bezeichnung'-Spalte erkannt.",true); return; }
+      let n=0;
+      for(let i=hi+1;i<grid.length;i++){
+        const r=grid[i]; if(r.every(c=>String(c).trim()==="")) continue;
+        const o={bezeichnung:"",art_nr_lieferant:"",art_nr_hersteller:"",hersteller:"",lieferant:"",mass:"",farbe:"",vpe:"",ek_exkl:null,quelle:file.name};
+        map.forEach((field,ci)=>{ if(!field) return; const val=r[ci];
+          if(field==="ek_exkl"||field==="vk_inkl"||field==="gewicht_kg") o[field]=parseNum(val);
+          else o[field]=clean(val); });
+        if(!o.bezeichnung) continue;
+        CANDIDATES.push(o); n++;
+      }
+      toast(n+" Zeilen aus "+file.name+" übernommen ("+mappedFields.length+" Spalten erkannt)");
+      const row=document.createElement("div"); row.className="frow";
+      row.innerHTML='<span style="color:var(--ok)">✓</span><span class="fn">'+file.name.replace(/</g,"&lt;")+'</span><span class="muted">'+n+' Zeilen</span>';
+      $("fileList").appendChild(row);
+      refreshCapture();
+    }catch(err){ toast("Excel/CSV-Fehler: "+(err.message||err), true); }
+  };
+  rd.readAsArrayBuffer(file);
+}
+
+function refreshCapture(){
+  const n=CANDIDATES.length;
+  $("capCount").innerHTML = n
+    ? "<b>"+n+"</b> Artikel erfasst. &nbsp; <button class='btn' id='goMatch' type='button'>Weiter zum Abgleich →</button>"
+    : "";
+  const b=$("goMatch"); if(b) b.addEventListener("click", runMatch);
+  const pv=$("capPreview");
+  if(n){
+    let h="<thead><tr><th>#</th><th>Bezeichnung</th><th>Lieferant</th><th>Art.nr.Lief.</th><th>Art.nr.Herst./EAN</th><th>EK</th><th>Quelle</th><th></th></tr></thead><tbody>";
+    CANDIDATES.forEach((c,i)=>{
+      h+="<tr><td class='muted'>"+(i+1)+"</td><td>"+esc(c.bezeichnung)+"</td><td>"+esc(c.lieferant)+"</td><td>"+esc(c.art_nr_lieferant)+"</td><td>"+esc(c.art_nr_hersteller)+"</td><td>"+(c.ek_exkl==null?"":c.ek_exkl)+"</td><td class='muted' style='max-width:160px;overflow:hidden;text-overflow:ellipsis'>"+esc(c.quelle||"")+"</td><td><button class='btn ghost' data-crm='"+i+"' style='padding:3px 8px' title='Aus Erfassung entfernen'>✕</button></td></tr>";
+    });
+    h+="</tbody>"; $("capTable").innerHTML=h; pv.classList.remove("hidden");
+    $("capTable").querySelectorAll("button[data-crm]").forEach(bt=>bt.addEventListener("click",()=>{ CANDIDATES.splice(+bt.dataset.crm,1); refreshCapture(); }));
+  } else { pv.classList.add("hidden"); }
+}
+
+/* ---------- Abgleich ---------- */
+function runMatch(){
+  if(!STAMM.loaded){ toast("Bitte zuerst den Stamm laden (oben).", true); return; }
+  NEWROWS=[]; SKIPPED=[];
+  const seenBatch=new Set();
+  for(const c of CANDIDATES){
+    if(!c.bezeichnung){ SKIPPED.push({c,grund:"keine Bezeichnung"}); continue; }
+    const na = norm(c.art_nr_lieferant);
+    const tl = normLief(c.lieferant);
+    const kh = norm(c.art_nr_hersteller);
+    let warnDup = null;
+    // 1) gleiche Art.nr.Lieferant bereits im Stamm?
+    if(na && STAMM.byArtNr.has(na)){
+      const hits = STAMM.byArtNr.get(na);
+      const same = hits.find(h => normLief(h.lieferant) === tl);
+      if(same){ SKIPPED.push({c,grund:"schon im Stamm ("+same.mv_code+", gleiche Art.nr. + Lieferant)"}); continue; }
+      // Art.nr. existiert, aber anderer Lieferantenname -> markieren statt still anlegen
+      warnDup = hits.map(h => h.mv_code+" ("+(h.lieferant||"?")+")").join(", ");
+    }
+    // 2) Art.nr.Hersteller bereits im Stamm?
+    if(kh && kh!=="-" && STAMM.keyHerst.has(kh)){ SKIPPED.push({c,grund:"schon im Stamm (Art.nr.Hersteller)"}); continue; }
+    // 3) Dublette innerhalb dieser Auswahl?
+    const bkey = na ? (tl+"|"+na) : (tl+"##"+norm(c.bezeichnung));
+    if(seenBatch.has(bkey)){ SKIPPED.push({c,grund:"Dublette in dieser Auswahl"}); continue; }
+    seenBatch.add(bkey);
+    const w=isWuerth(c.lieferant);
+    NEWROWS.push({
+      bezeichnung:c.bezeichnung, lieferant:c.lieferant,
+      art_nr_lieferant:c.art_nr_lieferant, art_nr_hersteller:c.art_nr_hersteller,
+      hersteller:c.hersteller, warengruppe:c.warengruppe||"", lagerort:c.lagerort||"", lagerplatz:c.lagerplatz||"",
+      mass:c.mass, farbe:c.farbe, vpe:c.vpe||"",
+      ek_exkl:c.ek_exkl, vk_inkl:(c.vk_inkl!=null?c.vk_inkl:null),
+      bestell_mail:c.bestell_mail||"", produktlink:c.produktlink||"",
+      bestellweg: w?"Würth":(c.bestellweg||""), etikett_typ: w?"kein":"",
+      warnDup: warnDup
+    });
+  }
+  renderSummary(); renderNewTable(); renderSkipped();
+  $("matchCard").classList.remove("hidden");
+  $("dupDetails").open = (NEWROWS.length===0 && SKIPPED.length>0);
+  updateCommitUI();
+  $("matchCard").scrollIntoView({behavior:"smooth"});
+}
+function updateCommitUI(){
+  $("commitCard").classList.toggle("hidden", NEWROWS.length===0);
+  $("commitLabel").textContent = NEWROWS.length+" neue Artikel übernehmen";
+}
+function removeNew(i){ NEWROWS.splice(i,1); renderSummary(); renderNewTable(); updateCommitUI(); }
+function renderSummary(){
+  const warnCount = NEWROWS.filter(r=>r.warnDup).length;
+  $("summary").innerHTML =
+    '<div class="stat"><b style="color:#4ade80">'+NEWROWS.length+'</b><span class="small muted">neu</span></div>'+
+    (warnCount?'<div class="stat"><b style="color:var(--warn)">'+warnCount+'</b><span class="small muted">⚠ zu prüfen</span></div>':'')+
+    '<div class="stat"><b style="color:#fbbf24">'+SKIPPED.length+'</b><span class="small muted">übersprungen</span></div>'+
+    '<div class="stat"><b>'+CANDIDATES.length+'</b><span class="small muted">erfasst gesamt</span></div>';
+}
+const COLS = [
+  ["bezeichnung","Bezeichnung","w-lg"],["lieferant","Lieferant",""],
+  ["art_nr_lieferant","Art.nr.Lief.","w-sm"],["art_nr_hersteller","Art.nr.Herst./EAN","w-sm"],
+  ["hersteller","Hersteller",""],["warengruppe","Warengruppe *",""],
+  ["lagerort","Lagerort *",""],["lagerplatz","Lagerplatz",""],
+  ["mass","Maß","w-sm"],["farbe","Farbe","w-sm"],["vpe","VPE","w-sm"],
+  ["ek_exkl","EK","w-sm"],["vk_inkl","VK","w-sm"],
+  ["bestellweg","Bestellweg",""],["bestell_mail","Bestell-Mail",""],["produktlink","Produktlink","w-lg"]
+];
+function renderNewTable(){
+  const t=$("newTable");
+  if(!NEWROWS.length){ t.innerHTML="<tbody><tr><td style='padding:16px;color:var(--muted)'>Keine neuen Artikel – alle erfassten sind bereits im Stamm. Details in der Liste der uebersprungenen Artikel unten.</td></tr></tbody>"; return; }
+  let html="<thead><tr><th>#</th>";
+  for(const [,label] of COLS) html+="<th>"+label+"</th>";
+  html+="<th>Etikett-Typ</th><th></th></tr></thead><tbody>";
+  NEWROWS.forEach((r,i)=>{
+    const warn = r.warnDup;
+    const wIcon = warn ? " <span style='color:var(--warn);cursor:help' title=\"Gleiche Art.nr.Lieferant existiert bereits: "+String(warn).replace(/"/g,"&quot;")+"\">⚠</span>" : "";
+    html+="<tr"+(warn?" style=\"background:rgba(245,158,11,.10)\"":"")+"><td class='muted'>"+(i+1)+wIcon+"</td>";
+    for(const [field,,w] of COLS){
+      const val = r[field]==null?"":r[field];
+      html+="<td><input class='"+(w||"")+"' data-i='"+i+"' data-f='"+field+"' value=\""+String(val).replace(/"/g,"&quot;")+"\"></td>";
+    }
+    html+="<td><select data-i='"+i+"' data-f='etikett_typ'>"+
+      ["","Regal","Artikel","kein"].map(o=>"<option "+(r.etikett_typ===o?"selected":"")+" value='"+o+"'>"+(o||"—")+"</option>").join("")+
+      "</select></td>";
+    html+="<td><button class='btn ghost' data-rm='"+i+"' title='Zeile entfernen' style='padding:4px 9px'>✕</button></td></tr>";
+  });
+  html+="</tbody>"; t.innerHTML=html;
+  t.querySelectorAll("input,select").forEach(el=>{
+    el.addEventListener("change", ()=>{ const i=+el.dataset.i, f=el.dataset.f; let v=el.value;
+      if(f==="ek_exkl"||f==="vk_inkl") v=parseNum(v);
+      NEWROWS[i][f]=v; });
+  });
+  t.querySelectorAll("button[data-rm]").forEach(b=>{ b.addEventListener("click", ()=> removeNew(+b.dataset.rm)); });
+}
+function renderSkipped(){
+  $("dupList").innerHTML = SKIPPED.length
+    ? SKIPPED.map(s=>'<div>• <span class="pill dup">'+s.grund+'</span> '+String(s.c.bezeichnung).replace(/</g,"&lt;")+' <span class="muted">('+String(s.c.lieferant||"")+" / "+String(s.c.art_nr_lieferant||"")+')</span></div>').join("")
+    : '<span class="muted">keine</span>';
+}
+$("bulkWgBtn").addEventListener("click",()=>{ const v=$("bulkWg").value.trim(); NEWROWS.forEach(r=>r.warengruppe=v); renderNewTable(); });
+$("bulkLoBtn").addEventListener("click",()=>{ const v=$("bulkLo").value.trim(); NEWROWS.forEach(r=>r.lagerort=v); renderNewTable(); });
+
+/* ---------- Übernehmen ---------- */
+$("commitBtn").addEventListener("click", async ()=>{
+  if(!NEWROWS.length) return;
+  const missing = NEWROWS.filter(r=>!r.warengruppe || !r.lagerort).length;
+  if(missing){ if(!confirm(missing+" Artikel haben keine Warengruppe/Lagerort. Trotzdem übernehmen?")) return; }
+  $("commitBtn").disabled=true; $("commitInfo").innerHTML='<span class="spin"></span> übernehme…';
+  const payload = NEWROWS.map(r=>{
+    const o={};
+    const put=(k,v)=>{ if(v!==""&&v!=null) o[k]=v; };
+    put("bezeichnung",r.bezeichnung); put("lieferant",r.lieferant);
+    put("art_nr_lieferant",r.art_nr_lieferant); put("art_nr_hersteller",r.art_nr_hersteller);
+    put("hersteller",r.hersteller); put("warengruppe",r.warengruppe);
+    put("lagerort",r.lagerort); put("lagerplatz",r.lagerplatz);
+    put("mass",r.mass); put("farbe",r.farbe); put("vpe",r.vpe);
+    if(r.ek_exkl!=null) o.ek_exkl=r.ek_exkl; if(r.vk_inkl!=null) o.vk_inkl=r.vk_inkl;
+    put("bestellweg",r.bestellweg); put("bestell_mail",r.bestell_mail); put("produktlink",r.produktlink);
+    put("etikett_typ",r.etikett_typ);
+    o.etikettiert=false;
+    return o;
+  });
+  try{
+    let inserted=[];
+    for(let i=0;i<payload.length;i+=400){
+      const chunk=payload.slice(i,i+400);
+      const { data, error } = await db.from("artikel").insert(chunk).select("mv_code,bezeichnung,lieferant,art_nr_lieferant");
+      if(error) throw error;
+      inserted=inserted.concat(data||[]);
+    }
+    inserted.sort((a,b)=>(a.mv_code>b.mv_code?1:-1));
+    showResult(inserted);
+    toast(inserted.length+" Artikel angelegt – MV-Nummern vergeben ✓");
+    await loadStamm(); // Stamm aktualisieren (nächste Nummer etc.)
+  }catch(e){
+    $("commitInfo").textContent="";
+    const m=(e.message||String(e));
+    if(/policy|permission|row-level|rls/i.test(m)){ $("policyHint").style.borderColor="var(--bad)"; toast("Rechte-Fehler: bitte die INSERT-Policy setzen (siehe Hinweis).", true); }
+    else toast("Übernahme fehlgeschlagen: "+m, true);
+    $("commitBtn").disabled=false;
+  }
+});
+function showResult(rows){
+  $("commitInfo").textContent="";
+  $("commitBtn").disabled=true;
+  $("resultWrap").classList.remove("hidden");
+  $("resultSummary").innerHTML='<div class="stat"><b style="color:#4ade80">'+rows.length+'</b><span class="small muted">angelegt</span></div>'+
+    (rows.length?'<div class="stat"><b>'+rows[0].mv_code+'</b><span class="small muted">erste</span></div><div class="stat"><b>'+rows[rows.length-1].mv_code+'</b><span class="small muted">letzte</span></div>':'');
+  let html="<thead><tr><th>MV-Code</th><th>Bezeichnung</th><th>Lieferant</th><th>Art.nr.Lief.</th></tr></thead><tbody>";
+  html+=rows.map(r=>"<tr><td><b>"+r.mv_code+"</b></td><td>"+String(r.bezeichnung||"").replace(/</g,"&lt;")+"</td><td>"+String(r.lieferant||"")+"</td><td>"+String(r.art_nr_lieferant||"")+"</td></tr>").join("");
+  html+="</tbody>"; $("resultTable").innerHTML=html;
+  window._lastResult=rows;
+  $("commitLabel").textContent="Übernommen ✓";
+}
+$("exportBtn").addEventListener("click", ()=>{
+  const rows=window._lastResult||[]; if(!rows.length) return;
+  let csv="﻿mv_code;bezeichnung;lieferant;art_nr_lieferant\n";
+  csv+=rows.map(r=>[r.mv_code,r.bezeichnung,r.lieferant,r.art_nr_lieferant].map(v=>{ const s=String(v==null?"":v); return /[";\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s; }).join(";")).join("\n");
+  const blob=new Blob([csv],{type:"text/csv;charset=utf-8;"});
+  const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download="Neue_Artikel_MV.csv"; a.click();
+});
+
+/* ---------- Bearbeiten-Modus ---------- */
+function setMode(edit){
+  $("modeAnlegen").classList.toggle("hidden", edit);
+  $("modeBearbeiten").classList.toggle("hidden", !edit);
+  $("tabAnlegen").className = "btn"+(edit?" ghost":"");
+  $("tabBearbeiten").className = "btn"+(edit?"":" ghost");
+}
+$("tabAnlegen").addEventListener("click", ()=>setMode(false));
+$("tabBearbeiten").addEventListener("click", ()=>setMode(true));
+
+const EDIT_FIELDS = [
+  ["bezeichnung","Bezeichnung","text","full"],
+  ["lieferant","Lieferant","text"], ["art_nr_lieferant","Art.nr. Lieferant","text"],
+  ["hersteller","Hersteller","text"], ["art_nr_hersteller","Art.nr. Hersteller / EAN","text"],
+  ["warengruppe","Warengruppe","text"], ["lagerort","Lagerort","text"], ["lagerplatz","Lagerplatz","text"],
+  ["mass","Maß","text"], ["farbe","Farbe","text"], ["vpe","VPE (Einheit)","text"],
+  ["ek_exkl","EK (exkl.)","num"], ["vk_inkl","VK (inkl.)","num"], ["gewicht_kg","Gewicht (kg)","num"],
+  ["lagerbestand","Lagerbestand","num"], ["lagerwert","Lagerwert","num"], ["zaehlmenge","Zählmenge","num"],
+  ["bestellweg","Bestellweg","text"], ["bestell_mail","Bestell-Mail","text"], ["produktlink","Produktlink","text","full"],
+  ["etikett_typ","Etikett-Typ","select"], ["etikettiert","Etikettiert","bool"]
+];
+let EDIT_CURRENT = null, EDIT_HITS = {};
+
+$("editSearchBtn").addEventListener("click", editSearch);
+$("editSearch").addEventListener("keydown", e=>{ if(e.key==="Enter") editSearch(); });
+async function editSearch(){
+  const q=$("editSearch").value.trim(); if(!q){ $("editResults").innerHTML=""; return; }
+  const like="%"+q+"%";
+  const { data, error } = await db.from("artikel").select("*")
+    .or(`mv_code.ilike.${like},bezeichnung.ilike.${like},art_nr_lieferant.ilike.${like},lieferant.ilike.${like}`)
+    .order("mv_nr",{ascending:true}).limit(25);
+  if(error){ toast("Suchfehler: "+error.message, true); return; }
+  if(!data||!data.length){ $("editResults").innerHTML='<div class="small muted">Keine Treffer.</div>'; return; }
+  EDIT_HITS={};
+  $("editResults").innerHTML = data.map(a=>{ EDIT_HITS[a.mv_code]=a;
+    return `<div class="frow"><b style="min-width:80px">${esc(a.mv_code)}</b><span class="fn">${esc(a.bezeichnung||"")} <span class="muted">· ${esc(a.lieferant||"")}${a.art_nr_lieferant?" · "+esc(a.art_nr_lieferant):""}</span></span><button class="btn" data-edit="${esc(a.mv_code)}" style="padding:4px 12px">bearbeiten</button></div>`;
+  }).join("");
+  $("editResults").querySelectorAll("button[data-edit]").forEach(b=>b.addEventListener("click",()=>loadEditForm(EDIT_HITS[b.dataset.edit])));
+}
+function loadEditForm(a){
+  EDIT_CURRENT = a;
+  $("editSaveInfo").innerHTML = "";
+  $("editMvCode").textContent = a.mv_code;
+  $("editFields").innerHTML = EDIT_FIELDS.map(f=>{
+    const col=f[0], label=f[1], type=f[2], full=f[3]==="full";
+    const wrap = (inner)=>`<div${full?" style=\"grid-column:1/-1\"":""}><label>${label}</label>${inner}</div>`;
+    if(type==="select") return wrap(`<select id="ef_${col}">`+["","Regal","Artikel","kein"].map(o=>`<option ${a[col]===o?"selected":""} value="${o}">${o||"—"}</option>`).join("")+`</select>`);
+    if(type==="bool") return wrap(`<select id="ef_${col}"><option value="false" ${!a[col]?"selected":""}>nein</option><option value="true" ${a[col]?"selected":""}>ja</option></select>`);
+    return wrap(`<input id="ef_${col}" type="text" value="${esc(a[col]==null?"":a[col])}">`);
+  }).join("");
+  $("editFormCard").classList.remove("hidden");
+  $("editFormCard").scrollIntoView({behavior:"smooth"});
+}
+$("editCancelBtn").addEventListener("click", ()=>{ $("editFormCard").classList.add("hidden"); EDIT_CURRENT=null; });
+$("editSaveBtn").addEventListener("click", async ()=>{
+  if(!EDIT_CURRENT) return;
+  const payload={};
+  EDIT_FIELDS.forEach(f=>{ const col=f[0], type=f[2], el=$("ef_"+col); if(!el) return;
+    if(type==="num") payload[col]=parseNum(el.value);
+    else if(type==="bool") payload[col]=(el.value==="true");
+    else if(type==="select") payload[col]=el.value||null;
+    else { const v=el.value.trim(); payload[col]= v===""?null:v; }
+  });
+  $("editSaveBtn").disabled=true; $("editSaveInfo").innerHTML='<span class="spin"></span> speichere…';
+  const code = EDIT_CURRENT.mv_code;
+  try{
+    const { error } = await db.from("artikel").update(payload).eq("id", EDIT_CURRENT.id);
+    if(error) throw error;
+    $("editSaveInfo").innerHTML='<span style="color:#fff;background:var(--ok);padding:3px 10px;border-radius:6px;font-weight:700">✓ Gespeichert</span>';
+    editSearch();
+  }catch(e){
+    const m=e.message||String(e);
+    $("editSaveInfo").innerHTML='<span style="color:#fff;background:var(--bad);padding:3px 10px;border-radius:6px;font-weight:700">✕ Fehler</span> <span style="color:var(--bad)">'+esc(m)+'</span>';
+  }
+  $("editSaveBtn").disabled=false;
+});
+
+/* ---------- Init ---------- */
+loadStamm();
+</script>
+</body>
+</html>
