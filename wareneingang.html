@@ -106,7 +106,7 @@ $("apiKey").addEventListener("input",()=>safeSet("anthropic_api_key",$("apiKey")
 $("toggleKey").addEventListener("click",()=>{const i=$("apiKey");i.type=i.type==="password"?"text":"password"});
 
 /* ---- Stamm laden ---- */
-let STAMM={byArtNr:new Map(),keyHerst:new Set(),loaded:false};
+let STAMM={byArtNr:new Map(),byHerst:new Map(),loaded:false};
 async function loadStamm(){
   try{
     let all=[],from=0,page=1000;
@@ -116,11 +116,12 @@ async function loadStamm(){
       all=all.concat(data||[]);
       if(!data||data.length<page) break; from+=page;
     }
-    STAMM.byArtNr=new Map(); STAMM.keyHerst=new Set();
+    STAMM.byArtNr=new Map(); STAMM.byHerst=new Map();
     for(const r of all){
       const na=norm(r.art_nr_lieferant);
       if(na){ if(!STAMM.byArtNr.has(na)) STAMM.byArtNr.set(na,[]); STAMM.byArtNr.get(na).push(r); }
-      const kh=norm(r.art_nr_hersteller); if(kh&&kh!=="-") STAMM.keyHerst.add(kh);
+      const kh=norm(r.art_nr_hersteller);
+      if(kh&&kh!=="-"){ if(!STAMM.byHerst.has(kh)) STAMM.byHerst.set(kh,[]); STAMM.byHerst.get(kh).push(r); }
     }
     STAMM.loaded=true; $("dotSb").className="dot on"; $("sbTxt").textContent=all.length+" Artikel im Stamm geladen";
   }catch(e){ $("dotSb").className="dot err"; $("sbTxt").textContent="Stamm-Fehler: "+(e.message||e); }
@@ -163,7 +164,8 @@ function fileToContent(f){
 const SCHEMA={type:"object",properties:{
   sender:{type:"string",description:"Lieferant/Absender des Lieferscheins, sonst 'k.A.'"},
   items:{type:"array",items:{type:"object",properties:{
-    artikelNummer:{type:"string",description:"Artikel-/Bestellnummer des Lieferanten für diese Position, sonst 'k.A.'"},
+    artikelNummer:{type:"string",description:"Beste Wahl für die Artikelnummer des Lieferanten (unter der DIESER Lieferant den Artikel führt), sonst 'k.A.'"},
+    nummern:{type:"array",items:{type:"string"},description:"ALLE in dieser Zeile sichtbaren Nummern/Codes: Artikelnummer, Bestellnummer, Referenznummer, EAN/GTIN usw. — NICHT die Positions-/Zeilennummer und NICHT die Menge"},
     bezeichnung:{type:"string",description:"Bezeichnung des Artikels"},
     menge:{type:"string",description:"gelieferte Menge inkl. Einheit, sonst ''"}
   },required:["bezeichnung"],additionalProperties:false}}
@@ -172,7 +174,7 @@ const SCHEMA={type:"object",properties:{
 async function extract(apiKey){
   const content=[];
   for(const f of FILES){ content.push(await fileToContent(f)); }
-  content.push({type:"text",text:"Dies ist ein Lieferschein (evtl. mehrere Seiten/Fotos). Extrahiere den Lieferanten/Absender und ALLE Warenpositionen mit Artikelnummer des Lieferanten (falls vorhanden, sonst 'k.A.'), Bezeichnung und gelieferter Menge. Ignoriere Versand, Porto, Gebühren, Zwischensummen und Kopf-/Fußzeilen. Nur echte Warenpositionen."});
+  content.push({type:"text",text:"Dies ist ein Lieferschein (evtl. mehrere Seiten/Fotos). Extrahiere den Lieferanten/Absender und ALLE echten Warenpositionen. Pro Position: 'artikelNummer' = die Artikelnummer des Lieferanten (die Nummer, unter der DIESER Lieferant den Artikel führt). Zusätzlich in 'nummern' ALLE weiteren auf der Zeile sichtbaren Nummern/Codes (Bestellnummer, Referenz, EAN/GTIN …). NICHT aufnehmen: Positions-/Zeilennummer und Menge. Außerdem Bezeichnung und gelieferte Menge. Ignoriere Versand, Porto, Gebühren, Zwischensummen und Kopf-/Fußzeilen."});
   const body={model:CLAUDE_MODEL,max_tokens:8000,
     system:"Du bist ein präziser Assistent für Lieferschein-Extraktion. Antworte ausschließlich mit dem geforderten JSON.",
     messages:[{role:"user",content}], output_config:{format:{type:"json_schema",schema:SCHEMA}}};
@@ -212,16 +214,24 @@ function match(data){
   const senderTl=normLief(data.sender);
   const items=(data.items||[]).filter(it=>clean(it.bezeichnung));
   const rows=items.map(it=>{
-    const na=norm(it.artikelNummer);
-    let status="neu", art=null, note="";
-    if(na && STAMM.byArtNr.has(na)){
-      const hits=STAMM.byArtNr.get(na);
-      const same=hits.find(h=>normLief(h.lieferant)===senderTl);
-      if(same){ status="ok"; art=same; }
-      else { status="pruef"; art=hits[0]; note="gleiche Art.nr. bei "+hits.map(h=>h.lieferant).join(", "); }
-    } else if(na && STAMM.keyHerst.has(na)){ status="pruef"; note="Nr. als Hersteller-Nr. im Stamm"; }
-    else if(!clean(it.artikelNummer)){ status="neu"; note="keine Artikelnummer erkannt"; }
-    return {it,status,art,note};
+    // Kandidaten: Hauptnummer + alle 'nummern', normalisiert, ab 3 Zeichen
+    const cands=[]; const seen=new Set();
+    const add=(x)=>{ const n=norm(x); if(n && n.length>=3 && n!=="-" && !seen.has(n)){ seen.add(n); cands.push(n); } };
+    add(it.artikelNummer); (it.nummern||[]).forEach(add);
+    let okArt=null, eanArt=null, pruefArt=null, pruefNote="";
+    for(const c of cands){
+      if(STAMM.byArtNr.has(c)){
+        const hits=STAMM.byArtNr.get(c);
+        const same=hits.find(h=>normLief(h.lieferant)===senderTl);
+        if(same){ okArt=same; break; }
+        else if(!pruefArt){ pruefArt=hits[0]; pruefNote="gleiche Nr. bei "+[...new Set(hits.map(h=>h.lieferant))].join(", "); }
+      }
+      if(!eanArt && STAMM.byHerst.has(c)){ eanArt=STAMM.byHerst.get(c)[0]; }
+    }
+    if(okArt) return {it,status:"ok",art:okArt,note:""};
+    if(eanArt) return {it,status:"ok",art:eanArt,note:"über Hersteller-/EAN-Nr. erkannt"};
+    if(pruefArt) return {it,status:"pruef",art:pruefArt,note:pruefNote};
+    return {it,status:"neu",art:null,note: cands.length?"":"keine Nummer erkannt"};
   });
   render(data.sender, rows);
 }
@@ -237,10 +247,16 @@ function render(sender, rows){
     const badge=r.status==="ok"?'<span class="badge ok">✅ '+esc(r.art.mv_code)+'</span>':
                 r.status==="pruef"?'<span class="badge pruef">⚠️ prüfen</span>':'<span class="badge neu">🆕 neu</span>';
     let meta=[];
-    if(r.it.artikelNummer&&clean(r.it.artikelNummer)) meta.push("Art.nr.: "+esc(clean(r.it.artikelNummer)));
     if(clean(r.it.menge)) meta.push("Menge: "+esc(clean(r.it.menge)));
-    if(r.status==="ok"&&r.art.lagerort) meta.push("Lager: "+esc(r.art.lagerort));
-    if(r.status==="ok") meta.push(r.art.etikettiert?"etikettiert ✓":"noch nicht etikettiert");
+    if(r.status==="ok"||r.status==="pruef"){
+      if(r.art.art_nr_lieferant) meta.push("Stamm-Art.nr.: "+esc(r.art.art_nr_lieferant));
+      if(r.art.lagerort) meta.push("Lager: "+esc(r.art.lagerort));
+      if(r.status==="ok") meta.push(r.art.etikettiert?"etikettiert ✓":"noch nicht etikettiert");
+    } else {
+      const nums=[clean(r.it.artikelNummer)].concat((r.it.nummern||[]).map(clean)).filter(Boolean);
+      const uniq=[...new Set(nums)];
+      if(uniq.length) meta.push("Erkannte Nr.: "+esc(uniq.join(", ")));
+    }
     if(r.note) meta.push(esc(r.note));
     return '<div class="pos '+cls+'"><div class="top"><div class="bez">'+esc(clean(r.it.bezeichnung))+'</div>'+badge+'</div>'+
       (meta.length?'<div class="meta">'+meta.join(" · ")+'</div>':'')+'</div>';
