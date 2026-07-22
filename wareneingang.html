@@ -222,30 +222,50 @@ const SCHEMA={type:"object",properties:{
   },required:["bezeichnung"],additionalProperties:false}}
 },required:["sender","items"],additionalProperties:false};
 
-async function extract(apiKey){
+const EXTRACT_PROMPT=
+"Dies ist ein Lieferschein (evtl. mehrere Seiten/Fotos). Extrahiere den Lieferanten/Absender und ALLE echten Warenpositionen (tatsächlich gelieferte Artikel/Produkte).\n\n"+
+"Pro Position: 'artikelNummer' = die Artikelnummer des Lieferanten (die Nummer, unter der DIESER Lieferant den Artikel führt). Zusätzlich in 'nummern' ALLE weiteren auf der Zeile sichtbaren Nummern/Codes (Bestellnummer, Referenz, EAN/GTIN …). In 'nummern' NICHT die Positions-/Zeilennummer und NICHT die Menge aufnehmen. Außerdem 'bezeichnung' und die gelieferte 'menge'.\n\n"+
+"KEINE Positionen aufnehmen (komplett ignorieren), die keine gelieferte Ware sind – zum Beispiel: Rabatt, Discount, Skonto, Nachlass, Gutschrift; Versand, Fracht, Porto, Verpackung, Verpackungskosten, Euro-Palette/Palette, Leergut, Pfand; Mindermengenzuschlag, Bearbeitungs-/Servicegebühr; Zwischensumme, Gesamtsumme, Netto, Brutto, MwSt./Steuer sowie Kopf- und Fußzeilen.";
+
+function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
+
+async function extract(apiKey,onRetry){
   const content=[];
   for(const f of FILES){ content.push(await fileToContent(f)); }
-  content.push({type:"text",text:"Dies ist ein Lieferschein (evtl. mehrere Seiten/Fotos). Extrahiere den Lieferanten/Absender und ALLE echten Warenpositionen. Pro Position: 'artikelNummer' = die Artikelnummer des Lieferanten (die Nummer, unter der DIESER Lieferant den Artikel führt). Zusätzlich in 'nummern' ALLE weiteren auf der Zeile sichtbaren Nummern/Codes (Bestellnummer, Referenz, EAN/GTIN …). NICHT aufnehmen: Positions-/Zeilennummer und Menge. Außerdem Bezeichnung und gelieferte Menge. Ignoriere Versand, Porto, Gebühren, Zwischensummen und Kopf-/Fußzeilen."});
+  content.push({type:"text",text:EXTRACT_PROMPT});
   const body={model:CLAUDE_MODEL,max_tokens:8000,
     system:"Du bist ein präziser Assistent für Lieferschein-Extraktion. Antworte ausschließlich mit dem geforderten JSON.",
     messages:[{role:"user",content}], output_config:{format:{type:"json_schema",schema:SCHEMA}}};
-  let resp;
-  try{ resp=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",
-    headers:{"content-type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
-    body:JSON.stringify(body)}); }
-  catch(e){ throw new Error("Netzwerkfehler beim Claude-Aufruf."); }
-  const json=await resp.json().catch(()=>null);
-  if(!resp.ok){ const msg=(json&&json.error&&json.error.message)||("HTTP "+resp.status);
+  const MAX=4, waits=[1200,2500,4500];   // bis zu 3 automatische Wiederholungen bei Überlastung
+  let lastErr=null;
+  for(let attempt=1; attempt<=MAX; attempt++){
+    let resp=null;
+    try{ resp=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",
+      headers:{"content-type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
+      body:JSON.stringify(body)}); }
+    catch(e){
+      lastErr=new Error("Netzwerkfehler beim Claude-Aufruf.");
+      if(attempt<MAX){ onRetry&&onRetry(attempt+1,MAX); await sleep(waits[attempt-1]); continue; }
+      throw lastErr;
+    }
+    const json=await resp.json().catch(()=>null);
+    if(resp.ok){
+      const parts=(json&&Array.isArray(json.content))?json.content:[];
+      let text=parts.filter(b=>b.type==="text").map(b=>b.text||"").join("").trim();
+      if(!text) throw new Error("Keine Antwort von Claude.");
+      if(text.includes("```")){ const m=text.match(/```(?:json)?\s*([\s\S]*?)\s*```/); if(m&&m[1]) text=m[1].trim(); }
+      return JSON.parse(text);
+    }
+    const msg=(json&&json.error&&json.error.message)||("HTTP "+resp.status);
+    const transient = resp.status===429 || resp.status===529 || resp.status>=500 || /overloaded/i.test(msg);
+    if(transient && attempt<MAX){ onRetry&&onRetry(attempt+1,MAX); await sleep(waits[attempt-1]); continue; }
     if(resp.status===401) throw new Error("Ungültiger API-Key (sk-ant-…).");
     if(resp.status===400&&/credit|balance|billing/i.test(msg)) throw new Error("Kein Guthaben auf dem Anthropic-Konto.");
-    if(resp.status===429) throw new Error("Rate Limit – kurz warten.");
-    if(resp.status===529||/overloaded/i.test(msg)) throw new Error("Claude überlastet – gleich erneut.");
-    throw new Error(msg); }
-  const parts=(json&&Array.isArray(json.content))?json.content:[];
-  let text=parts.filter(b=>b.type==="text").map(b=>b.text||"").join("").trim();
-  if(!text) throw new Error("Keine Antwort von Claude.");
-  if(text.includes("```")){ const m=text.match(/```(?:json)?\s*([\s\S]*?)\s*```/); if(m&&m[1]) text=m[1].trim(); }
-  return JSON.parse(text);
+    if(resp.status===429) throw new Error("Rate Limit erreicht – bitte kurz warten und erneut.");
+    if(resp.status===529||/overloaded/i.test(msg)) throw new Error("Claude ist gerade überlastet – bitte gleich noch einmal.");
+    throw new Error(msg);
+  }
+  throw lastErr||new Error("Auslesen fehlgeschlagen.");
 }
 
 async function runExtract(){
@@ -253,8 +273,9 @@ async function runExtract(){
   if(!apiKey){ toast("Bitte Claude-API-Key eintragen (oben aufklappen).",true); return; }
   if(!STAMM.loaded){ toast("Stamm noch nicht geladen – kurz warten.",true); return; }
   const btn=$("readBtn"); btn.disabled=true; btn.innerHTML='<span class="spin"></span> lese aus…';
+  const onRetry=(n,max)=>{ if($("readBtn")) $("readBtn").innerHTML='<span class="spin"></span> Claude ausgelastet – neuer Versuch '+n+'/'+max+'…'; };
   try{
-    const data=await extract(apiKey);
+    const data=await extract(apiKey,onRetry);
     match(data);
   }catch(e){ toast("Fehler: "+(e.message||e),true); }
   if($("readBtn")){ $("readBtn").disabled=false; $("readBtn").innerHTML='🔍 erneut auslesen'; }
