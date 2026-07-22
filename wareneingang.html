@@ -6,7 +6,7 @@
 <title>MV-Wareneingang</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
-  :root{ --bg:#0f172a;--panel:#1e293b;--panel2:#273449;--line:#334155;--line2:#3f4d63;--text:#e2e8f0;--muted:#94a3b8;--accent:#3b82f6;--accent2:#2563eb;--ok:#22c55e;--warn:#f59e0b;--bad:#ef4444;--chip:#0b1220; }
+  :root{ --bg:#0f172a;--panel:#1e293b;--panel2:#273449;--line:#334155;--line2:#3f4d63;--text:#e2e8f0;--muted:#94a3b8;--accent:#3b82f6;--accent2:#2563eb;--ok:#22c55e;--warn:#f59e0b;--bad:#ef4444;--chip:#0b1220;--test:#a855f7; }
   *{box-sizing:border-box}
   body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-size:15px}
   header{position:sticky;top:0;z-index:20;background:#0b1220;border-bottom:1px solid var(--line);padding:10px 14px;display:flex;align-items:center;gap:10px;justify-content:space-between}
@@ -19,21 +19,25 @@
   .card h2{margin:0 0 4px;font-size:15px}
   .sub{color:var(--muted);font-size:12.5px;margin-bottom:10px}
   label{display:block;font-size:12px;color:var(--muted);margin-bottom:4px}
-  input[type=text],input[type=password]{width:100%;background:var(--chip);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:10px;font-size:14px}
+  input[type=text],input[type=password],select{width:100%;background:var(--chip);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:10px;font-size:14px}
   .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;background:var(--accent);color:#fff;border:none;border-radius:10px;padding:13px 18px;font-size:15px;font-weight:600;cursor:pointer;width:100%}
   .btn:hover{background:var(--accent2)} .btn:disabled{opacity:.5}
   .btn.secondary{background:var(--panel2);border:1px solid var(--line2)}
+  .btn.test{background:var(--test)} .btn.test:hover{background:#9333ea}
+  .btn.sm{padding:9px 12px;font-size:13px;width:auto}
   .dot{width:9px;height:9px;border-radius:50%;display:inline-block;margin-right:5px}
   .dot.on{background:var(--ok)}.dot.off{background:var(--warn)}.dot.err{background:var(--bad)}
   .status{font-size:12px;color:var(--muted)}
   .muted{color:var(--muted)} .small{font-size:12px}
+  .testbanner{background:rgba(168,85,247,.14);border:1px solid var(--test);color:#d8b4fe;border-radius:10px;padding:9px 12px;font-size:12.5px;margin-bottom:14px;display:flex;gap:8px;align-items:flex-start}
+  .testbanner.err{background:rgba(239,68,68,.14);border-color:var(--bad);color:#fca5a5}
   .thumbs{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
   .thumbs img{height:64px;border-radius:8px;border:1px solid var(--line2)}
   .summary{display:flex;gap:8px;flex-wrap:wrap;margin:4px 0 12px}
-  .stat{flex:1;min-width:90px;background:var(--chip);border:1px solid var(--line);border-radius:10px;padding:8px 12px;text-align:center}
+  .stat{flex:1;min-width:80px;background:var(--chip);border:1px solid var(--line);border-radius:10px;padding:8px 12px;text-align:center}
   .stat b{display:block;font-size:22px}
   .pos{background:var(--chip);border:1px solid var(--line);border-left-width:4px;border-radius:10px;padding:11px 12px;margin-bottom:9px}
-  .pos.ok{border-left-color:var(--ok)} .pos.neu{border-left-color:var(--bad)} .pos.pruef{border-left-color:var(--warn)}
+  .pos.ok{border-left-color:var(--ok)} .pos.neu{border-left-color:var(--bad)} .pos.pruef{border-left-color:var(--warn)} .pos.angelegt{border-left-color:var(--test)}
   .pos .top{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}
   .pos .bez{font-weight:600;line-height:1.25}
   .pos .meta{color:var(--muted);font-size:12px;margin-top:3px}
@@ -41,7 +45,13 @@
   .badge.ok{background:rgba(34,197,94,.16);color:#4ade80}
   .badge.neu{background:rgba(239,68,68,.16);color:#f87171}
   .badge.pruef{background:rgba(245,158,11,.16);color:#fbbf24}
+  .badge.angelegt{background:rgba(168,85,247,.18);color:#d8b4fe}
   .lief{font-weight:600}
+  .posActions{margin-top:9px}
+  .anlegen-form{margin-top:10px;border-top:1px dashed var(--line2);padding-top:10px}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .grid2 .full{grid-column:1 / -1}
+  .anlegen-form label{margin-top:2px}
   .spin{width:16px;height:16px;border:2px solid var(--line2);border-top-color:#fff;border-radius:50%;display:inline-block;animation:sp .7s linear infinite;vertical-align:middle}
   @keyframes sp{to{transform:rotate(360deg)}}
   .toast{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);background:#111827;border:1px solid var(--line2);color:#fff;padding:10px 15px;border-radius:9px;font-size:13px;z-index:50;max-width:92vw}
@@ -57,6 +67,8 @@
 </header>
 
 <main>
+  <div id="testbanner" class="testbanner hidden"></div>
+
   <div class="card">
     <div class="status"><span id="dotSb" class="dot off"></span><span id="sbTxt">Stamm lädt…</span></div>
     <details style="margin-top:8px">
@@ -82,7 +94,7 @@
     <div id="liefLine" class="sub"></div>
     <div class="summary" id="summary"></div>
     <div id="positions"></div>
-    <div class="small muted" style="margin-top:6px">✅ = schon im Stamm (MV-Nr.) · 🆕 = neu (anlegen) · ⚠️ = gleiche Nr., anderer Lieferant (prüfen)</div>
+    <div class="small muted" style="margin-top:6px">✅ = schon im Stamm (MV-Nr.) · 🆕 = neu (anlegen) · ⚠️ = gleiche Nr., anderer Lieferant (prüfen) · 🧪 = in dieser Sitzung testweise angelegt</div>
   </div>
 </main>
 
@@ -90,6 +102,16 @@
 const SUPABASE_URL="https://vmxucwenjpwrjpeqcuhc.supabase.co";
 const SUPABASE_KEY="sb_publishable_bKycBdawzkSItE7G0YVamQ_ikkJMm0j";
 const CLAUDE_MODEL="claude-sonnet-5";
+
+/* ============================================================
+   TESTMODUS
+   TEST_MODE=true  → neue Artikel werden in "artikel_test" angelegt
+                     (MV-9xxxxx, verbraucht keine echten MV-Nummern).
+   Zum Scharfschalten später: TEST_MODE=false  → schreibt in "artikel".
+   ============================================================ */
+const TEST_MODE = true;
+const WRITE_TABLE = TEST_MODE ? "artikel_test" : "artikel";
+
 const db=window.supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
 const $=(id)=>document.getElementById(id);
 function esc(v){return String(v==null?"":v).replace(/[&<>"]/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[m]))}
@@ -98,6 +120,21 @@ function norm(v){return String(v==null?"":v).replace(/\s+/g," ").trim().toLowerC
 function clean(v){let s=String(v==null?"":v).replace(/\s+/g," ").trim();return (s==="k.A."||s==="-")?"":s}
 function normLief(v){let s=norm(v).replace(/[.,&/]/g," ");s=s.replace(/\b(gmbh|mbh|co|kg|kgaa|ag|ohg|ug|se|gbr|ek|e\s+k|inh|inhaber|fa|firma)\b/g," ");return s.replace(/\s+/g," ").trim()}
 
+/* ---- Testmodus-Banner ---- */
+let TEST_TABLE_OK=false;
+function setBanner(){
+  const b=$("testbanner");
+  if(!TEST_MODE){ b.classList.add("hidden"); return; }
+  b.classList.remove("hidden");
+  if(TEST_TABLE_OK){
+    b.className="testbanner";
+    b.innerHTML="<span>🧪</span><div><b>Testmodus aktiv.</b> Neu angelegte Artikel gehen in die <b>Test-Tabelle</b> (MV-9xxxxx) und verbrauchen keine echten MV-Nummern. Der echte Stamm bleibt unberührt.</div>";
+  }else{
+    b.className="testbanner err";
+    b.innerHTML="<span>⚠️</span><div><b>Test-Tabelle fehlt noch.</b> Bitte einmalig das SQL <code>artikel_test-setup.sql</code> im Supabase-SQL-Editor ausführen. Auslesen &amp; Abgleich funktionieren, aber „Anlegen“ ist bis dahin deaktiviert.</div>";
+  }
+}
+
 /* ---- Key ---- */
 function safeGet(k){try{return localStorage.getItem(k)}catch(e){return null}}
 function safeSet(k,v){try{localStorage.setItem(k,v)}catch(e){}}
@@ -105,26 +142,40 @@ $("apiKey").value=safeGet("anthropic_api_key")||"";
 $("apiKey").addEventListener("input",()=>safeSet("anthropic_api_key",$("apiKey").value.trim()));
 $("toggleKey").addEventListener("click",()=>{const i=$("apiKey");i.type=i.type==="password"?"text":"password"});
 
-/* ---- Stamm laden ---- */
+/* ---- Stamm laden (echt + Test) ---- */
 let STAMM={byArtNr:new Map(),byHerst:new Map(),loaded:false};
+function indexRow(r,source){
+  r._src=source; // 'echt' | 'test'
+  const na=norm(r.art_nr_lieferant);
+  if(na){ if(!STAMM.byArtNr.has(na)) STAMM.byArtNr.set(na,[]); STAMM.byArtNr.get(na).push(r); }
+  const kh=norm(r.art_nr_hersteller);
+  if(kh&&kh!=="-"){ if(!STAMM.byHerst.has(kh)) STAMM.byHerst.set(kh,[]); STAMM.byHerst.get(kh).push(r); }
+}
+async function pageAll(table){
+  let all=[],from=0,page=1000;
+  while(true){
+    const {data,error}=await db.from(table).select("mv_nr,mv_code,art_nr_lieferant,art_nr_hersteller,lieferant,bezeichnung,lagerort,etikettiert,etikett_typ").order("mv_nr",{ascending:true}).range(from,from+page-1);
+    if(error) throw error;
+    all=all.concat(data||[]);
+    if(!data||data.length<page) break; from+=page;
+  }
+  return all;
+}
 async function loadStamm(){
+  STAMM.byArtNr=new Map(); STAMM.byHerst=new Map(); STAMM.loaded=false;
+  let echtN=0, testN=0;
   try{
-    let all=[],from=0,page=1000;
-    while(true){
-      const {data,error}=await db.from("artikel").select("mv_nr,mv_code,art_nr_lieferant,art_nr_hersteller,lieferant,bezeichnung,lagerort,etikettiert,etikett_typ").order("mv_nr",{ascending:true}).range(from,from+page-1);
-      if(error) throw error;
-      all=all.concat(data||[]);
-      if(!data||data.length<page) break; from+=page;
-    }
-    STAMM.byArtNr=new Map(); STAMM.byHerst=new Map();
-    for(const r of all){
-      const na=norm(r.art_nr_lieferant);
-      if(na){ if(!STAMM.byArtNr.has(na)) STAMM.byArtNr.set(na,[]); STAMM.byArtNr.get(na).push(r); }
-      const kh=norm(r.art_nr_hersteller);
-      if(kh&&kh!=="-"){ if(!STAMM.byHerst.has(kh)) STAMM.byHerst.set(kh,[]); STAMM.byHerst.get(kh).push(r); }
-    }
-    STAMM.loaded=true; $("dotSb").className="dot on"; $("sbTxt").textContent=all.length+" Artikel im Stamm geladen";
-  }catch(e){ $("dotSb").className="dot err"; $("sbTxt").textContent="Stamm-Fehler: "+(e.message||e); }
+    const echt=await pageAll("artikel");
+    echt.forEach(r=>indexRow(r,"echt")); echtN=echt.length;
+  }catch(e){ $("dotSb").className="dot err"; $("sbTxt").textContent="Stamm-Fehler: "+(e.message||e); return; }
+  // Test-Tabelle zusätzlich einlesen (damit dieselbe Neuanlage nicht doppelt entsteht)
+  try{
+    const test=await pageAll("artikel_test");
+    test.forEach(r=>indexRow(r,"test")); testN=test.length; TEST_TABLE_OK=true;
+  }catch(e){ TEST_TABLE_OK=false; /* Tabelle existiert (noch) nicht → ignorieren */ }
+  STAMM.loaded=true; $("dotSb").className="dot on";
+  $("sbTxt").textContent=echtN+" Artikel im Stamm"+(TEST_TABLE_OK?(" · "+testN+" in der Test-Tabelle"):"");
+  setBanner();
 }
 
 /* ---- Foto/Datei-Auswahl ---- */
@@ -210,10 +261,11 @@ async function runExtract(){
 }
 
 /* ---- Abgleich ---- */
+let ROWS=[], SENDER="";
 function match(data){
   const senderTl=normLief(data.sender);
   const items=(data.items||[]).filter(it=>clean(it.bezeichnung));
-  const rows=items.map(it=>{
+  ROWS=items.map(it=>{
     // Kandidaten: Hauptnummer + alle 'nummern', normalisiert, ab 3 Zeichen
     const cands=[]; const seen=new Set();
     const add=(x)=>{ const n=norm(x); if(n && n.length>=3 && n!=="-" && !seen.has(n)){ seen.add(n); cands.push(n); } };
@@ -228,43 +280,146 @@ function match(data){
       }
       if(!eanArt && STAMM.byHerst.has(c)){ eanArt=STAMM.byHerst.get(c)[0]; }
     }
-    if(okArt) return {it,status:"ok",art:okArt,note:""};
+    if(okArt) return {it,status:"ok",art:okArt,note: okArt._src==="test"?"in der Test-Tabelle":""};
     if(eanArt) return {it,status:"ok",art:eanArt,note:"über Hersteller-/EAN-Nr. erkannt"};
     if(pruefArt) return {it,status:"pruef",art:pruefArt,note:pruefNote};
     return {it,status:"neu",art:null,note: cands.length?"":"keine Nummer erkannt"};
   });
-  render(data.sender, rows);
+  SENDER=data.sender||"";
+  render();
 }
-function render(sender, rows){
-  const nOk=rows.filter(r=>r.status==="ok").length, nNeu=rows.filter(r=>r.status==="neu").length, nP=rows.filter(r=>r.status==="pruef").length;
-  $("liefLine").innerHTML="Lieferant lt. Lieferschein: <span class='lief'>"+esc(sender||"—")+"</span> · "+rows.length+" Positionen";
+
+function bestNums(it){
+  const uniq=[...new Set([clean(it.artikelNummer)].concat((it.nummern||[]).map(clean)).filter(Boolean))];
+  return uniq;
+}
+function posInner(r,i){
+  const cls=r.status;
+  let badge;
+  if(r.status==="ok") badge='<span class="badge ok">✅ '+esc(r.art.mv_code)+'</span>';
+  else if(r.status==="pruef") badge='<span class="badge pruef">⚠️ prüfen</span>';
+  else if(r.status==="angelegt") badge='<span class="badge angelegt">🧪 '+esc(r.art.mv_code)+'</span>';
+  else badge='<span class="badge neu">🆕 neu</span>';
+
+  let meta=[];
+  if(clean(r.it.menge)) meta.push("Menge: "+esc(clean(r.it.menge)));
+  if(r.status==="ok"||r.status==="pruef"||r.status==="angelegt"){
+    if(r.art.art_nr_lieferant) meta.push("Stamm-Art.nr.: "+esc(r.art.art_nr_lieferant));
+    if(r.art.lagerort) meta.push("Lager: "+esc(r.art.lagerort));
+    if(r.status==="ok") meta.push(r.art.etikettiert?"etikettiert ✓":"noch nicht etikettiert");
+    if(r.status==="angelegt") meta.push("angelegt in Test-Tabelle");
+  } else {
+    const uniq=bestNums(r.it);
+    if(uniq.length) meta.push("Erkannte Nr.: "+esc(uniq.join(", ")));
+  }
+  if(r.note) meta.push(esc(r.note));
+
+  let html='<div class="top"><div class="bez">'+esc(clean(r.it.bezeichnung))+'</div>'+badge+'</div>'+
+    (meta.length?'<div class="meta">'+meta.join(" · ")+'</div>':'');
+
+  // Anlegen nur für "neu"
+  if(r.status==="neu"){
+    if(!TEST_TABLE_OK){
+      html+='<div class="posActions"><span class="small muted">Anlegen erst nach Anlegen der Test-Tabelle möglich.</span></div>';
+    }else{
+      const nums=bestNums(r.it);
+      const artLief=nums[0]||"";
+      const artHerst=nums[1]||"";
+      html+='<div class="posActions"><button class="btn test sm anlegenToggle" type="button">➕ Anlegen</button></div>'+
+        '<div class="anlegen-form hidden">'+
+          '<div class="grid2">'+
+            '<div class="full"><label>Bezeichnung *</label><input type="text" name="bezeichnung" value="'+esc(clean(r.it.bezeichnung))+'"></div>'+
+            '<div><label>Art.nr. Lieferant</label><input type="text" name="art_nr_lieferant" value="'+esc(artLief)+'"></div>'+
+            '<div><label>Art.nr. Hersteller</label><input type="text" name="art_nr_hersteller" value="'+esc(artHerst)+'"></div>'+
+            '<div class="full"><label>Lieferant</label><input type="text" name="lieferant" value="'+esc(clean(SENDER))+'"></div>'+
+            '<div><label>Lagerort</label><input type="text" name="lagerort" value=""></div>'+
+            '<div><label>Lagerplatz</label><input type="text" name="lagerplatz" value=""></div>'+
+            '<div><label>Warengruppe</label><input type="text" name="warengruppe" value=""></div>'+
+            '<div><label>Maße</label><input type="text" name="mass" value=""></div>'+
+            '<div class="full"><label>Etikett-Typ</label><select name="etikett_typ"><option value="Artikel">Artikel</option><option value="Regal">Regal</option><option value="kein">kein</option></select></div>'+
+          '</div>'+
+          '<button class="btn test saveBtn" type="button" style="margin-top:10px">💾 In Test-Tabelle anlegen</button>'+
+        '</div>';
+    }
+  }
+  return html;
+}
+
+function render(){
+  const nOk=ROWS.filter(r=>r.status==="ok").length;
+  const nNeu=ROWS.filter(r=>r.status==="neu").length;
+  const nP=ROWS.filter(r=>r.status==="pruef").length;
+  const nA=ROWS.filter(r=>r.status==="angelegt").length;
+  $("liefLine").innerHTML="Lieferant lt. Lieferschein: <span class='lief'>"+esc(SENDER||"—")+"</span> · "+ROWS.length+" Positionen";
   $("summary").innerHTML=
     '<div class="stat"><b style="color:#4ade80">'+nOk+'</b><span class="small muted">im Stamm</span></div>'+
     '<div class="stat"><b style="color:#f87171">'+nNeu+'</b><span class="small muted">neu</span></div>'+
-    (nP?'<div class="stat"><b style="color:#fbbf24">'+nP+'</b><span class="small muted">prüfen</span></div>':'');
-  $("positions").innerHTML=rows.map(r=>{
-    const cls=r.status==="ok"?"ok":(r.status==="pruef"?"pruef":"neu");
-    const badge=r.status==="ok"?'<span class="badge ok">✅ '+esc(r.art.mv_code)+'</span>':
-                r.status==="pruef"?'<span class="badge pruef">⚠️ prüfen</span>':'<span class="badge neu">🆕 neu</span>';
-    let meta=[];
-    if(clean(r.it.menge)) meta.push("Menge: "+esc(clean(r.it.menge)));
-    if(r.status==="ok"||r.status==="pruef"){
-      if(r.art.art_nr_lieferant) meta.push("Stamm-Art.nr.: "+esc(r.art.art_nr_lieferant));
-      if(r.art.lagerort) meta.push("Lager: "+esc(r.art.lagerort));
-      if(r.status==="ok") meta.push(r.art.etikettiert?"etikettiert ✓":"noch nicht etikettiert");
-    } else {
-      const nums=[clean(r.it.artikelNummer)].concat((r.it.nummern||[]).map(clean)).filter(Boolean);
-      const uniq=[...new Set(nums)];
-      if(uniq.length) meta.push("Erkannte Nr.: "+esc(uniq.join(", ")));
-    }
-    if(r.note) meta.push(esc(r.note));
-    return '<div class="pos '+cls+'"><div class="top"><div class="bez">'+esc(clean(r.it.bezeichnung))+'</div>'+badge+'</div>'+
-      (meta.length?'<div class="meta">'+meta.join(" · ")+'</div>':'')+'</div>';
-  }).join("");
+    (nP?'<div class="stat"><b style="color:#fbbf24">'+nP+'</b><span class="small muted">prüfen</span></div>':'')+
+    (nA?'<div class="stat"><b style="color:#d8b4fe">'+nA+'</b><span class="small muted">angelegt</span></div>':'');
+  $("positions").innerHTML=ROWS.map((r,i)=>'<div class="pos '+r.status+'" data-i="'+i+'">'+posInner(r,i)+'</div>').join("");
   $("resultCard").classList.remove("hidden");
   $("resultCard").scrollIntoView({behavior:"smooth"});
 }
+function reRenderPos(i){
+  const el=$("positions").querySelector('.pos[data-i="'+i+'"]');
+  if(!el) return;
+  el.className="pos "+ROWS[i].status;
+  el.innerHTML=posInner(ROWS[i],i);
+  // Summary neu rechnen
+  render.updateSummary && render.updateSummary();
+}
 
+/* ---- Anlegen (Insert in WRITE_TABLE) ---- */
+$("positions").addEventListener("click",(e)=>{
+  const toggle=e.target.closest(".anlegenToggle");
+  if(toggle){ const f=toggle.closest(".pos").querySelector(".anlegen-form"); if(f) f.classList.toggle("hidden"); return; }
+  const save=e.target.closest(".saveBtn");
+  if(save){ const pos=save.closest(".pos"); doInsert(+pos.dataset.i, pos.querySelector(".anlegen-form"), save); return; }
+});
+
+async function doInsert(i, formEl, btn){
+  const g=(name)=>{ const el=formEl.querySelector('[name="'+name+'"]'); return el?el.value.trim():""; };
+  const bezeichnung=g("bezeichnung");
+  if(!bezeichnung){ toast("Bezeichnung fehlt.",true); return; }
+  const lieferant=g("lieferant");
+  const art_nr_lieferant=g("art_nr_lieferant");
+
+  // Dedup-Recheck direkt vor dem Insert: gleicher Lieferant + gleiche Art.nr. → blockieren
+  const na=norm(art_nr_lieferant), senderTl=normLief(lieferant);
+  if(na && STAMM.byArtNr.has(na)){
+    const dup=STAMM.byArtNr.get(na).find(h=>normLief(h.lieferant)===senderTl);
+    if(dup){ toast("Existiert schon: "+dup.mv_code+(dup._src==="test"?" (Test)":"")+" – nicht doppelt angelegt.",true); return; }
+  }
+
+  const payload={
+    bezeichnung,
+    lieferant: lieferant||null,
+    art_nr_lieferant: art_nr_lieferant||null,
+    art_nr_hersteller: g("art_nr_hersteller")||null,
+    lagerort: g("lagerort")||null,
+    lagerplatz: g("lagerplatz")||null,
+    warengruppe: g("warengruppe")||null,
+    mass: g("mass")||null,
+    etikett_typ: g("etikett_typ")||null,
+    etikettiert: false
+  };
+
+  btn.disabled=true; btn.innerHTML='<span class="spin"></span> anlegen…';
+  try{
+    const {data,error}=await db.from(WRITE_TABLE).insert(payload)
+      .select("mv_nr,mv_code,art_nr_lieferant,art_nr_hersteller,lieferant,bezeichnung,lagerort,etikettiert,etikett_typ").single();
+    if(error) throw error;
+    indexRow(data,"test");                 // sofort in den In-Memory-Stamm → Folgepositionen erkennen ihn
+    ROWS[i].status="angelegt"; ROWS[i].art=data; ROWS[i].note="";
+    render();                              // Summary + Position neu zeichnen
+    toast("Angelegt: "+data.mv_code);
+  }catch(e){
+    btn.disabled=false; btn.innerHTML='💾 In Test-Tabelle anlegen';
+    toast("Anlegen fehlgeschlagen: "+(e.message||e),true);
+  }
+}
+
+setBanner();
 loadStamm();
 </script>
 </body>
