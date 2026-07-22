@@ -95,6 +95,13 @@
     <div class="summary" id="summary"></div>
     <div id="positions"></div>
     <div class="small muted" style="margin-top:6px">✅ = schon im Stamm (MV-Nr.) · 🆕 = neu (anlegen) · ⚠️ = gleiche Nr., anderer Lieferant (prüfen) · 🧪 = in dieser Sitzung testweise angelegt</div>
+    <button class="btn secondary" id="nextBtn" type="button" style="margin-top:12px">✅ Fertig – nächster Lieferschein</button>
+  </div>
+
+  <div class="card hidden" id="todayCard">
+    <h2>📋 Heute neu angelegt <span id="todayCount" class="muted"></span></h2>
+    <div class="sub">Nur zur Kontrolle. Diese Artikel sind <b>gespeichert</b> und bleiben erhalten – auch wenn du oben „Auswahl verwerfen“ oder „nächster Lieferschein“ drückst.</div>
+    <div id="todayList"></div>
   </div>
 </main>
 
@@ -187,7 +194,7 @@ function renderThumbs(){
     if(/pdf$/i.test(f.type)||/\.pdf$/i.test(f.name)) return '<div class="thumbs" style="height:64px;display:flex;align-items:center;padding:0 10px;border:1px solid var(--line2);border-radius:8px">📄 PDF</div>';
     return '<img src="'+URL.createObjectURL(f)+'" alt="">';
   }).join("");
-  $("go").innerHTML = FILES.length ? '<button class="btn" id="readBtn" type="button">🔍 '+FILES.length+' Seite(n) auslesen &amp; abgleichen</button> <button class="btn secondary" id="clearBtn" type="button" style="margin-top:8px">Zurücksetzen</button>' : '';
+  $("go").innerHTML = FILES.length ? '<button class="btn" id="readBtn" type="button">🔍 '+FILES.length+' Seite(n) auslesen &amp; abgleichen</button> <button class="btn secondary" id="clearBtn" type="button" style="margin-top:8px">Auswahl verwerfen</button>' : '';
   if($("readBtn")) $("readBtn").addEventListener("click",runExtract);
   if($("clearBtn")) $("clearBtn").addEventListener("click",()=>{FILES=[];renderThumbs();$("resultCard").classList.add("hidden");});
 }
@@ -283,30 +290,31 @@ async function runExtract(){
 
 /* ---- Abgleich ---- */
 let ROWS=[], SENDER="";
-function match(data){
-  const senderTl=normLief(data.sender);
-  const items=(data.items||[]).filter(it=>clean(it.bezeichnung));
-  ROWS=items.map(it=>{
-    // Kandidaten: Hauptnummer + alle 'nummern', normalisiert, ab 3 Zeichen
-    const cands=[]; const seen=new Set();
-    const add=(x)=>{ const n=norm(x); if(n && n.length>=3 && n!=="-" && !seen.has(n)){ seen.add(n); cands.push(n); } };
-    add(it.artikelNummer); (it.nummern||[]).forEach(add);
-    let okArt=null, eanArt=null, pruefArt=null, pruefNote="";
-    for(const c of cands){
-      if(STAMM.byArtNr.has(c)){
-        const hits=STAMM.byArtNr.get(c);
-        const same=hits.find(h=>normLief(h.lieferant)===senderTl);
-        if(same){ okArt=same; break; }
-        else if(!pruefArt){ pruefArt=hits[0]; pruefNote="gleiche Nr. bei "+[...new Set(hits.map(h=>h.lieferant))].join(", "); }
-      }
-      if(!eanArt && STAMM.byHerst.has(c)){ eanArt=STAMM.byHerst.get(c)[0]; }
+function classify(it){
+  const senderTl=normLief(SENDER);
+  // Kandidaten: Hauptnummer + alle 'nummern', normalisiert, ab 3 Zeichen
+  const cands=[]; const seen=new Set();
+  const add=(x)=>{ const n=norm(x); if(n && n.length>=3 && n!=="-" && !seen.has(n)){ seen.add(n); cands.push(n); } };
+  add(it.artikelNummer); (it.nummern||[]).forEach(add);
+  let okArt=null, eanArt=null, pruefArt=null, pruefNote="";
+  for(const c of cands){
+    if(STAMM.byArtNr.has(c)){
+      const hits=STAMM.byArtNr.get(c);
+      const same=hits.find(h=>normLief(h.lieferant)===senderTl);
+      if(same){ okArt=same; break; }
+      else if(!pruefArt){ pruefArt=hits[0]; pruefNote="gleiche Nr. bei "+[...new Set(hits.map(h=>h.lieferant))].join(", "); }
     }
-    if(okArt) return {it,status:"ok",art:okArt,note: okArt._src==="test"?"in der Test-Tabelle":""};
-    if(eanArt) return {it,status:"ok",art:eanArt,note:"über Hersteller-/EAN-Nr. erkannt"};
-    if(pruefArt) return {it,status:"pruef",art:pruefArt,note:pruefNote};
-    return {it,status:"neu",art:null,note: cands.length?"":"keine Nummer erkannt"};
-  });
+    if(!eanArt && STAMM.byHerst.has(c)){ eanArt=STAMM.byHerst.get(c)[0]; }
+  }
+  if(okArt) return {status:"ok",art:okArt,note: okArt._src==="test"?"in der Test-Tabelle":""};
+  if(eanArt) return {status:"ok",art:eanArt,note:"über Hersteller-/EAN-Nr. erkannt"};
+  if(pruefArt) return {status:"pruef",art:pruefArt,note:pruefNote};
+  return {status:"neu",art:null,note: cands.length?"":"keine Nummer erkannt"};
+}
+function match(data){
   SENDER=data.sender||"";
+  const items=(data.items||[]).filter(it=>clean(it.bezeichnung));
+  ROWS=items.map(it=>{ const c=classify(it); return {it,status:c.status,art:c.art,note:c.note}; });
   render();
 }
 
@@ -363,6 +371,19 @@ function posInner(r,i){
         '</div>';
     }
   }
+
+  // Stamm-Korrektur nur für "prüfen" (Lieferantenname), PIN-geschützt
+  if(r.status==="pruef" && r.art){
+    const tgt = r.art._src==="test" ? "artikel_test" : "artikel";
+    html+='<div class="posActions"><button class="btn secondary sm stammToggle" type="button">✏️ Stamm anpassen</button></div>'+
+      '<div class="stamm-form hidden">'+
+        '<div class="small muted" style="margin-bottom:8px">Treffer <b>'+esc(r.art.mv_code)+'</b> – im Stamm als Lieferant »'+esc(r.art.lieferant||"—")+'«, Lieferschein sagt »'+esc(SENDER||"—")+'«.'+(tgt==="artikel"?' <b>Ändert den echten Stamm.</b>':'')+'</div>'+
+        '<label>Lieferant im Stamm</label>'+
+        '<input type="text" name="lieferant" value="'+esc(r.art.lieferant||"")+'">'+
+        '<button class="btn secondary sm stammUebernehmen" type="button" style="margin-top:8px">→ »'+esc(SENDER||"")+'« übernehmen</button>'+
+        '<button class="btn stammSave" type="button" style="margin-top:10px;background:var(--warn)">💾 Stamm-Lieferant speichern</button>'+
+      '</div>';
+  }
   return html;
 }
 
@@ -390,13 +411,51 @@ function reRenderPos(i){
   render.updateSummary && render.updateSummary();
 }
 
-/* ---- Anlegen (Insert in WRITE_TABLE) ---- */
+/* ---- PIN-Gate für Änderungen am echten Stamm ---- */
+const PIN="2017";
+function pinOk(){ try{ return sessionStorage.getItem("mv_admin_ok")==="1"; }catch(e){ return false; } }
+function ensurePin(){
+  if(pinOk()) return true;
+  const p=prompt("PIN für Änderungen am Stamm:");
+  if(p===null) return false;
+  if(p.trim()===PIN){ try{ sessionStorage.setItem("mv_admin_ok","1"); }catch(e){} return true; }
+  toast("Falsche PIN.",true); return false;
+}
+
+/* ---- Klicks in der Positionsliste (Anlegen + Stamm-Korrektur) ---- */
 $("positions").addEventListener("click",(e)=>{
   const toggle=e.target.closest(".anlegenToggle");
   if(toggle){ const f=toggle.closest(".pos").querySelector(".anlegen-form"); if(f) f.classList.toggle("hidden"); return; }
   const save=e.target.closest(".saveBtn");
   if(save){ const pos=save.closest(".pos"); doInsert(+pos.dataset.i, pos.querySelector(".anlegen-form"), save); return; }
+  const st=e.target.closest(".stammToggle");
+  if(st){ if(!ensurePin()) return; const f=st.closest(".pos").querySelector(".stamm-form"); if(f) f.classList.toggle("hidden"); return; }
+  const su=e.target.closest(".stammUebernehmen");
+  if(su){ const inp=su.closest(".stamm-form").querySelector('[name="lieferant"]'); if(inp) inp.value=SENDER; return; }
+  const ss=e.target.closest(".stammSave");
+  if(ss){ const pos=ss.closest(".pos"); doStammFix(+pos.dataset.i, pos.querySelector(".stamm-form"), ss); return; }
 });
+
+async function doStammFix(i, formEl, btn){
+  const r=ROWS[i];
+  if(!r || !r.art){ return; }
+  const el=formEl.querySelector('[name="lieferant"]'); const val=el?el.value.trim():"";
+  if(!val){ toast("Lieferant darf nicht leer sein.",true); return; }
+  const table = r.art._src==="test" ? "artikel_test" : "artikel";
+  btn.disabled=true; btn.innerHTML='<span class="spin"></span> speichern…';
+  try{
+    const {error}=await db.from(table).update({lieferant:val}).eq("mv_nr", r.art.mv_nr);
+    if(error) throw error;
+    r.art.lieferant=val;                       // gleiche Objektreferenz wie im STAMM-Index → sofort wirksam
+    const c=classify(r.it);                     // Zeile neu einordnen (wird i. d. R. „ok")
+    ROWS[i]={it:r.it,status:c.status,art:c.art,note:c.note};
+    render();
+    toast("Stamm aktualisiert: "+r.art.mv_code);
+  }catch(e){
+    btn.disabled=false; btn.innerHTML='💾 Stamm-Lieferant speichern';
+    toast("Speichern fehlgeschlagen: "+(e.message||e),true);
+  }
+}
 
 async function doInsert(i, formEl, btn){
   const g=(name)=>{ const el=formEl.querySelector('[name="'+name+'"]'); return el?el.value.trim():""; };
@@ -428,11 +487,12 @@ async function doInsert(i, formEl, btn){
   btn.disabled=true; btn.innerHTML='<span class="spin"></span> anlegen…';
   try{
     const {data,error}=await db.from(WRITE_TABLE).insert(payload)
-      .select("mv_nr,mv_code,art_nr_lieferant,art_nr_hersteller,lieferant,bezeichnung,lagerort,etikettiert,etikett_typ").single();
+      .select("mv_nr,mv_code,art_nr_lieferant,art_nr_hersteller,lieferant,bezeichnung,lagerort,etikettiert,etikett_typ,created_at").single();
     if(error) throw error;
     indexRow(data,"test");                 // sofort in den In-Memory-Stamm → Folgepositionen erkennen ihn
     ROWS[i].status="angelegt"; ROWS[i].art=data; ROWS[i].note="";
     render();                              // Summary + Position neu zeichnen
+    TODAY.unshift(data); renderToday();    // Kontrollliste sofort ergänzen
     toast("Angelegt: "+data.mv_code);
   }catch(e){
     btn.disabled=false; btn.innerHTML='💾 In Test-Tabelle anlegen';
@@ -440,8 +500,41 @@ async function doInsert(i, formEl, btn){
   }
 }
 
+/* ---- Heute neu angelegt (Kontrollliste) ---- */
+let TODAY=[];
+function todayStartISO(){ const d=new Date(); d.setHours(0,0,0,0); return d.toISOString(); }
+function hhmm(ts){ try{ const d=new Date(ts); return String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0"); }catch(e){ return ""; } }
+async function loadToday(){
+  try{
+    const {data,error}=await db.from(WRITE_TABLE)
+      .select("mv_code,bezeichnung,lieferant,created_at")
+      .gte("created_at",todayStartISO()).order("created_at",{ascending:false});
+    if(error) throw error;
+    TODAY=data||[]; renderToday();
+  }catch(e){ /* Tabelle fehlt o. Ä. → Liste bleibt leer */ }
+}
+function renderToday(){
+  $("todayCount").textContent = TODAY.length ? "· "+TODAY.length : "";
+  if(!TODAY.length){ $("todayCard").classList.add("hidden"); return; }
+  $("todayCard").classList.remove("hidden");
+  $("todayList").innerHTML=TODAY.map(r=>
+    '<div class="pos angelegt"><div class="top"><div class="bez">'+esc(r.bezeichnung||"—")+'</div>'+
+    '<span class="badge angelegt">🧪 '+esc(r.mv_code)+'</span></div>'+
+    '<div class="meta">'+[r.lieferant?esc(r.lieferant):"", hhmm(r.created_at)+" Uhr"].filter(Boolean).join(" · ")+'</div></div>'
+  ).join("");
+}
+
+/* ---- Nächster Lieferschein (Scan-Ansicht leeren, Kontrollliste bleibt) ---- */
+$("nextBtn").addEventListener("click",()=>{
+  FILES=[]; renderThumbs();
+  ROWS=[]; SENDER="";
+  $("resultCard").classList.add("hidden");
+  window.scrollTo({top:0,behavior:"smooth"});
+});
+
 setBanner();
 loadStamm();
+loadToday();
 </script>
 </body>
 </html>
