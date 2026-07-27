@@ -52,6 +52,13 @@
   .grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
   .grid2 .full{grid-column:1 / -1}
   .anlegen-form label{margin-top:2px}
+  .order-block{margin-top:10px;border-radius:8px;padding:10px 12px;border:1px solid var(--line2);background:rgba(59,130,246,.08)}
+  .order-block.open{border-color:#2563eb;background:rgba(37,99,235,.12)}
+  .order-block.done{border-color:var(--ok);background:rgba(34,197,94,.10)}
+  .order-block.ret{border-color:var(--muted);background:rgba(148,163,184,.10)}
+  .order-block .ob-head{font-weight:600;font-size:13px}
+  .order-block .ob-meta{color:var(--muted);font-size:12px;margin-top:2px}
+  .order-block .btn.sm{background:var(--accent)}
   .spin{width:16px;height:16px;border:2px solid var(--line2);border-top-color:#fff;border-radius:50%;display:inline-block;animation:sp .7s linear infinite;vertical-align:middle}
   @keyframes sp{to{transform:rotate(360deg)}}
   .toast{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);background:#111827;border:1px solid var(--line2);color:#fff;padding:10px 15px;border-radius:9px;font-size:13px;z-index:50;max-width:92vw}
@@ -93,8 +100,24 @@
     <h2>2 · Abgleich mit dem Stamm</h2>
     <div id="liefLine" class="sub"></div>
     <div class="summary" id="summary"></div>
+    <div id="orderInfo" class="small" style="margin:0 0 10px"></div>
     <div id="positions"></div>
     <div class="small muted" style="margin-top:6px">✅ = schon im Stamm (MV-Nr.) · 🆕 = neu (anlegen) · ⚠️ = gleiche Nr., anderer Lieferant (prüfen) · 🧪 = in dieser Sitzung testweise angelegt</div>
+
+    <div id="archiveBlock" style="margin-top:14px;border-top:1px solid var(--line);padding-top:12px">
+      <h2 style="font-size:14px;margin:0 0 8px">3 · Wareneingang ablegen</h2>
+      <label>Lieferant (für die Ablage)</label>
+      <input id="archLief" type="text" placeholder="Lieferant">
+      <div class="grid2" style="margin-top:8px">
+        <div><label>Lagerort</label><input id="archLager" type="text" placeholder="z. B. Regal A3"></div>
+        <div><label>Kommission</label><input id="archKomm" type="text" placeholder="optional"></div>
+      </div>
+      <label style="margin-top:8px">Notiz</label>
+      <input id="archNotiz" type="text" placeholder="optional">
+      <button class="btn" id="archSave" type="button" style="margin-top:10px">🗄️ Wareneingang speichern</button>
+      <div id="archStatus" class="small muted" style="margin-top:8px"></div>
+    </div>
+
     <button class="btn secondary" id="nextBtn" type="button" style="margin-top:12px">✅ Fertig – nächster Lieferschein</button>
   </div>
 
@@ -118,6 +141,11 @@ const CLAUDE_MODEL="claude-sonnet-5";
    ============================================================ */
 const TEST_MODE = true;
 const WRITE_TABLE = TEST_MODE ? "artikel_test" : "artikel";
+
+/* Lokaler Ablage-Server: nur aktiv, wenn die App vom lokalen Server (http, kein GitHub Pages) geladen wurde.
+   Dann werden die Scans an denselben Server (…/upload) geschickt und landen lokal im Ordner Lieferant/Monat. */
+const LOCAL_MODE = location.protocol==="http:" && !/github\.io$/i.test(location.hostname);
+const UPLOAD_URL = location.origin + "/upload";
 
 const db=window.supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
 const $=(id)=>document.getElementById(id);
@@ -288,6 +316,51 @@ async function runExtract(){
   if($("readBtn")){ $("readBtn").disabled=false; $("readBtn").innerHTML='🔍 erneut auslesen'; }
 }
 
+/* ---- Offene Bestellungen (Schritt C: Bestellungs-Abgleich) ---- */
+let ORDERS={all:[],byMv:new Map(),byArt:new Map(),loaded:false};
+function indexOrders(){
+  ORDERS.byMv=new Map(); ORDERS.byArt=new Map();
+  for(const o of ORDERS.all){
+    o._nl=normLief(o.lieferant);
+    if(o.mv_nr!=null){ const k=Number(o.mv_nr); if(!ORDERS.byMv.has(k)) ORDERS.byMv.set(k,[]); ORDERS.byMv.get(k).push(o); }
+    const na=norm(o.art_nr);
+    if(na && na.length>=3 && na!=="-"){ if(!ORDERS.byArt.has(na)) ORDERS.byArt.set(na,[]); ORDERS.byArt.get(na).push(o); }
+  }
+}
+async function loadOpenOrders(){
+  try{
+    let all=[],from=0,page=1000;
+    while(true){
+      const {data,error}=await db.from("bestellungen")
+        .select("id,bestellt_am,melder,quelle,mv_nr,bezeichnung,art_nr,lieferant,warengruppe,is_freitext,menge,kommission,kommentar,lieferstatus,gelieferte_menge,letzte_lieferung_am")
+        .in("lieferstatus",["offen","teilweise"]).order("bestellt_am",{ascending:true}).range(from,from+page-1);
+      if(error) throw error;
+      all=all.concat(data||[]);
+      if(!data||data.length<page) break; from+=page;
+    }
+    ORDERS.all=all; indexOrders(); ORDERS.loaded=true;
+  }catch(e){ ORDERS.loaded=false; /* Tabelle fehlt o. Ä. → Abgleich neutral aus */ }
+}
+// Kandidaten-Bestellungen für eine Position: gleicher Lieferant (tolerant) + Artikel via mv_nr/art_nr/Nummer
+function findOrdersForRow(row){
+  if(!ORDERS.loaded) return [];
+  const senderNl=normLief(SENDER);
+  const out=new Map();
+  const consider=(o)=>{ if(!o) return; if(o.lieferstatus!=="offen"&&o.lieferstatus!=="teilweise") return; if(o._nl!==senderNl) return; out.set(o.id,o); };
+  if(row.art && row.art.mv_nr!=null){ (ORDERS.byMv.get(Number(row.art.mv_nr))||[]).forEach(consider); }
+  for(const n of bestNums(row.it)){
+    const na=norm(n);
+    (ORDERS.byArt.get(na)||[]).forEach(consider);
+    const asInt=parseInt(n,10);
+    if(!isNaN(asInt)) (ORDERS.byMv.get(asInt)||[]).forEach(consider);
+  }
+  return [...out.values()];
+}
+function attachOrders(row){ row.orders=findOrdersForRow(row); }
+function parseNum(s){ const m=String(s==null?"":s).replace(",",".").match(/-?\d+(\.\d+)?/); return m?Number(m[0]):NaN; }
+function fmtNum(n){ n=Number(n); return Number.isFinite(n)?(Number.isInteger(n)?String(n):String(n)):"0"; }
+function fmtDate(iso){ try{ const d=new Date(iso); return String(d.getDate()).padStart(2,"0")+"."+String(d.getMonth()+1).padStart(2,"0")+"."; }catch(e){ return ""; } }
+
 /* ---- Abgleich ---- */
 let ROWS=[], SENDER="";
 function classify(it){
@@ -314,7 +387,8 @@ function classify(it){
 function match(data){
   SENDER=data.sender||"";
   const items=(data.items||[]).filter(it=>clean(it.bezeichnung));
-  ROWS=items.map(it=>{ const c=classify(it); return {it,status:c.status,art:c.art,note:c.note}; });
+  ROWS=items.map(it=>{ const c=classify(it); return {it,status:c.status,art:c.art,note:c.note,orders:[]}; });
+  ROWS.forEach(attachOrders);
   render();
 }
 
@@ -384,7 +458,39 @@ function posInner(r,i){
         '<button class="btn stammSave" type="button" style="margin-top:10px;background:var(--warn)">💾 Stamm-Lieferant speichern</button>'+
       '</div>';
   }
+
+  // Bestellungs-Abgleich (Schritt C): pro passender offener Bestellung ein Block
+  if(r.orders && r.orders.length){
+    html+=r.orders.map(o=>orderBlock(o,r)).join("");
+  }
   return html;
+}
+
+function orderBlock(o,row){
+  const menge=Number(o.menge||0), gel=Number(o.gelieferte_menge||0);
+  const rest=Math.max(0,menge-gel);
+  const dat=o.bestellt_am?fmtDate(o.bestellt_am):"";
+  const info=[o.melder?"von "+esc(o.melder):"", o.kommission?"Kom. "+esc(o.kommission):""].filter(Boolean).join(" · ");
+  if(o.lieferstatus==="zurückgegeben"){
+    return '<div class="order-block ret" data-oid="'+o.id+'"><div class="ob-head">↩ zurückgegeben</div>'+
+      '<div class="ob-meta">Bestellung'+(dat?" vom "+dat:"")+(info?" · "+info:"")+'</div></div>';
+  }
+  if(o.lieferstatus==="geliefert" || rest<=0){
+    return '<div class="order-block done" data-oid="'+o.id+'"><div class="ob-head">✅ gebucht: '+fmtNum(gel)+' / '+fmtNum(menge)+' geliefert · Status: '+esc(o.lieferstatus)+'</div>'+
+      '<div class="ob-meta">Bestellung'+(dat?" vom "+dat:"")+(info?" · "+info:"")+'</div>'+
+      '<button class="btn secondary sm orderReturn" type="button" style="margin-top:8px">↩ zurückgegeben</button></div>';
+  }
+  // offen / teilweise → Buchen-UI (Vorbelegung: Lieferschein-Menge, sonst offener Rest)
+  const dn=parseNum(row.it.menge);
+  const prefill=(!isNaN(dn)&&dn>0)?fmtNum(dn):(rest>0?fmtNum(rest):"1");
+  return '<div class="order-block open" data-oid="'+o.id+'">'+
+    '<div class="ob-head">📦 Offene Bestellung'+(dat?" · bestellt "+dat:"")+'</div>'+
+    (info?'<div class="ob-meta">'+info+'</div>':'')+
+    '<div class="ob-meta">'+fmtNum(menge)+' bestellt · '+fmtNum(gel)+' geliefert → offen: '+fmtNum(rest)+'</div>'+
+    '<div style="display:flex;gap:8px;align-items:flex-end;margin-top:8px">'+
+      '<div style="flex:0 0 92px"><label>geliefert jetzt</label><input type="text" name="bookmenge" value="'+esc(prefill)+'" inputmode="decimal"></div>'+
+      '<button class="btn sm orderBook" type="button" style="flex:1">✓ als geliefert buchen</button>'+
+    '</div></div>';
 }
 
 function render(){
@@ -399,6 +505,14 @@ function render(){
     (nP?'<div class="stat"><b style="color:#fbbf24">'+nP+'</b><span class="small muted">prüfen</span></div>':'')+
     (nA?'<div class="stat"><b style="color:#d8b4fe">'+nA+'</b><span class="small muted">angelegt</span></div>':'');
   $("positions").innerHTML=ROWS.map((r,i)=>'<div class="pos '+r.status+'" data-i="'+i+'">'+posInner(r,i)+'</div>').join("");
+  if(ORDERS.loaded){
+    const nl=normLief(SENDER);
+    const open=ORDERS.all.filter(o=>o._nl===nl && (o.lieferstatus==="offen"||o.lieferstatus==="teilweise")).length;
+    $("orderInfo").innerHTML = open>0
+      ? '<span style="color:#93c5fd">📦 '+open+' offene App-Bestellung(en) dieses Lieferanten</span>'
+      : '<span class="muted">ℹ ohne App-Bestellung (z. B. Würth/Amazon/Ebay) – kein Abgleich nötig</span>';
+  } else { $("orderInfo").innerHTML=""; }
+  if($("archLief") && !$("archLief").value) $("archLief").value=SENDER||"";
   $("resultCard").classList.remove("hidden");
   $("resultCard").scrollIntoView({behavior:"smooth"});
 }
@@ -434,7 +548,46 @@ $("positions").addEventListener("click",(e)=>{
   if(su){ const inp=su.closest(".stamm-form").querySelector('[name="lieferant"]'); if(inp) inp.value=SENDER; return; }
   const ss=e.target.closest(".stammSave");
   if(ss){ const pos=ss.closest(".pos"); doStammFix(+pos.dataset.i, pos.querySelector(".stamm-form"), ss); return; }
+  const ob=e.target.closest(".orderBook");
+  if(ob){ const blk=ob.closest(".order-block"); doBookDelivery(+blk.dataset.oid, blk.querySelector('[name="bookmenge"]'), ob); return; }
+  const orr=e.target.closest(".orderReturn");
+  if(orr){ const blk=orr.closest(".order-block"); doReturnDelivery(+blk.dataset.oid, orr); return; }
 });
+
+async function doBookDelivery(oid, inputEl, btn){
+  const o=ORDERS.all.find(x=>x.id===oid); if(!o){ return; }
+  const val=Number(String(inputEl?inputEl.value:"").replace(",",".").trim());
+  if(!(val>0)){ toast("Menge muss größer 0 sein.",true); return; }
+  const neu=Number(o.gelieferte_menge||0)+val;
+  const voll=neu>=Number(o.menge||0);
+  btn.disabled=true; btn.innerHTML='<span class="spin"></span> buchen…';
+  try{
+    const patch={gelieferte_menge:neu, lieferstatus:voll?"geliefert":"teilweise", letzte_lieferung_am:new Date().toISOString().slice(0,10)};
+    const {error}=await db.from("bestellungen").update(patch).eq("id",oid);
+    if(error) throw error;
+    Object.assign(o,patch);                       // gleiche Objektreferenz → Anzeige aktualisiert sich
+    render();
+    toast("Lieferung gebucht: "+fmtNum(neu)+" / "+fmtNum(Number(o.menge||0)));
+  }catch(e){ btn.disabled=false; btn.innerHTML='✓ als geliefert buchen'; toast("Buchen fehlgeschlagen: "+(e.message||e),true); }
+}
+
+async function doReturnDelivery(oid, btn){
+  const o=ORDERS.all.find(x=>x.id===oid); if(!o){ return; }
+  const grund=prompt("Grund der Rückgabe (wird an den Kommentar angehängt):");
+  if(grund===null) return;
+  const stamp=new Date().toISOString().slice(0,10);
+  const anhang="[zurückgegeben "+stamp+"] "+((grund||"").trim()||"ohne Grund");
+  const neuKommentar=(o.kommentar?o.kommentar+"\n":"")+anhang;
+  btn.disabled=true; btn.innerHTML='<span class="spin"></span>…';
+  try{
+    const patch={lieferstatus:"zurückgegeben", kommentar:neuKommentar};
+    const {error}=await db.from("bestellungen").update(patch).eq("id",oid);
+    if(error) throw error;
+    Object.assign(o,patch);
+    render();
+    toast("Als zurückgegeben gebucht.");
+  }catch(e){ btn.disabled=false; btn.innerHTML='↩ zurückgegeben'; toast("Fehlgeschlagen: "+(e.message||e),true); }
+}
 
 async function doStammFix(i, formEl, btn){
   const r=ROWS[i];
@@ -448,7 +601,8 @@ async function doStammFix(i, formEl, btn){
     if(error) throw error;
     r.art.lieferant=val;                       // gleiche Objektreferenz wie im STAMM-Index → sofort wirksam
     const c=classify(r.it);                     // Zeile neu einordnen (wird i. d. R. „ok")
-    ROWS[i]={it:r.it,status:c.status,art:c.art,note:c.note};
+    ROWS[i]={it:r.it,status:c.status,art:c.art,note:c.note,orders:[]};
+    attachOrders(ROWS[i]);
     render();
     toast("Stamm aktualisiert: "+r.art.mv_code);
   }catch(e){
@@ -491,6 +645,7 @@ async function doInsert(i, formEl, btn){
     if(error) throw error;
     indexRow(data,"test");                 // sofort in den In-Memory-Stamm → Folgepositionen erkennen ihn
     ROWS[i].status="angelegt"; ROWS[i].art=data; ROWS[i].note="";
+    attachOrders(ROWS[i]);                 // neue MV-Nr. → evtl. offene Bestellung zuordnen
     render();                              // Summary + Position neu zeichnen
     TODAY.unshift(data); renderToday();    // Kontrollliste sofort ergänzen
     toast("Angelegt: "+data.mv_code);
@@ -524,10 +679,76 @@ function renderToday(){
   ).join("");
 }
 
+/* ---- Wareneingang ablegen: Scans lokal hochladen + Liste in Supabase ---- */
+function fileToUploadB64(f){
+  return new Promise((resolve,reject)=>{
+    if(/pdf$/i.test(f.type)||/\.pdf$/i.test(f.name)){
+      const r=new FileReader(); r.onload=()=>resolve({b64:String(r.result).split(",")[1],ext:"pdf",filename:f.name||"scan.pdf"}); r.onerror=reject; r.readAsDataURL(f); return;
+    }
+    const img=new Image();
+    img.onload=()=>{
+      const max=2000; let w=img.width,h=img.height;
+      if(Math.max(w,h)>max){ const s=max/Math.max(w,h); w=Math.round(w*s); h=Math.round(h*s); }
+      const c=document.createElement("canvas"); c.width=w; c.height=h;
+      c.getContext("2d").drawImage(img,0,0,w,h);
+      const durl=c.toDataURL("image/jpeg",0.85);
+      resolve({b64:durl.split(",")[1],ext:"jpg",filename:f.name||"scan.jpg"});
+    };
+    img.onerror=reject; img.src=URL.createObjectURL(f);
+  });
+}
+async function saveWareneingang(){
+  if(!ROWS.length && !FILES.length){ toast("Nichts zu speichern.",true); return; }
+  const btn=$("archSave"), st=$("archStatus");
+  btn.disabled=true; btn.innerHTML='<span class="spin"></span> speichern…'; st.textContent="";
+  const lieferant=($("archLief").value.trim())||SENDER||"Unbekannt";
+  const datumISO=new Date().toISOString().slice(0,10);
+  let dateien=[], uploadWarn="";
+  try{
+    if(LOCAL_MODE){
+      let seite=1;
+      for(const f of FILES){
+        const u=await fileToUploadB64(f);
+        const resp=await fetch(UPLOAD_URL,{method:"POST",headers:{"content-type":"application/json"},
+          body:JSON.stringify({lieferant,datum:datumISO,seite:seite++,filename:u.filename,dataB64:u.b64})});
+        if(!resp.ok) throw new Error("Server "+resp.status);
+        const j=await resp.json().catch(()=>null);
+        if(j&&j.path) dateien.push(j.path);
+      }
+    } else {
+      uploadWarn=" · Bilder nicht abgelegt (App nicht vom lokalen Server geladen)";
+    }
+  }catch(e){
+    btn.disabled=false; btn.innerHTML='🗄️ Wareneingang speichern';
+    st.innerHTML='<span style="color:#f87171">Bild-Upload fehlgeschlagen: '+esc(e.message||e)+'. Läuft der lokale Server?</span>';
+    return;
+  }
+  const positionen=ROWS.map(r=>({bezeichnung:clean(r.it.bezeichnung),nummern:bestNums(r.it),menge:clean(r.it.menge),status:r.status,mv_code:r.art?r.art.mv_code:null}));
+  const abgeglichen=ROWS.some(r=>r.status==="ok"||r.status==="angelegt");
+  let listWarn="";
+  try{
+    const {error}=await db.from("wareneingang").insert({
+      lieferant, positionen, dateien,
+      lagerort:$("archLager").value.trim()||null,
+      kommission:$("archKomm").value.trim()||null,
+      abgeglichen, notiz:$("archNotiz").value.trim()||null
+    });
+    if(error) throw error;
+  }catch(e){ listWarn=" · Liste nicht gespeichert (Tabelle „wareneingang“ noch nicht angelegt)"; }
+  btn.disabled=false; btn.innerHTML='🗄️ Wareneingang speichern';
+  const okMsg=(dateien.length?(dateien.length+" Scan(s) lokal abgelegt"):"gespeichert")+uploadWarn+listWarn;
+  st.innerHTML='<span style="color:#4ade80">✔ '+esc(okMsg)+'</span>';
+  toast("Wareneingang gespeichert.");
+}
+$("archSave").addEventListener("click",saveWareneingang);
+
 /* ---- Nächster Lieferschein (Scan-Ansicht leeren, Kontrollliste bleibt) ---- */
 $("nextBtn").addEventListener("click",()=>{
   FILES=[]; renderThumbs();
   ROWS=[]; SENDER="";
+  ["archLief","archLager","archKomm","archNotiz"].forEach(id=>{ if($(id)) $(id).value=""; });
+  $("archStatus").textContent=""; $("archSave").disabled=false; $("archSave").innerHTML='🗄️ Wareneingang speichern';
+  $("orderInfo").innerHTML="";
   $("resultCard").classList.add("hidden");
   window.scrollTo({top:0,behavior:"smooth"});
 });
@@ -535,6 +756,7 @@ $("nextBtn").addEventListener("click",()=>{
 setBanner();
 loadStamm();
 loadToday();
+loadOpenOrders();
 </script>
 </body>
 </html>
