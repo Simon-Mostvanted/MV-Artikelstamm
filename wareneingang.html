@@ -131,9 +131,9 @@
 
     <div id="archiveBlock" style="margin-top:14px;border-top:1px solid var(--line);padding-top:12px">
       <h2 style="font-size:14px;margin:0 0 8px">3 · Wareneingang ablegen</h2>
-      <label>Lieferant (für die Ablage)</label>
-      <input id="archLief" type="text" placeholder="Lieferant">
-      <div class="grid2" style="margin-top:8px">
+      <div class="grid2">
+        <div><label>Lieferant (für die Ablage)</label><input id="archLief" type="text" placeholder="Lieferant"></div>
+        <div><label>Lieferschein-Nr.</label><input id="archLsnr" type="text" placeholder="falls vorhanden"></div>
         <div><label>Lagerort</label><input id="archLager" type="text" placeholder="z. B. Regal A3"></div>
         <div><label>Kommission</label><input id="archKomm" type="text" placeholder="optional"></div>
       </div>
@@ -170,10 +170,9 @@ const MV_LOGO="data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEAkACQAAD/2wBDAAIBAQIBAQ
 const TEST_MODE = true;
 const WRITE_TABLE = TEST_MODE ? "artikel_test" : "artikel";
 
-/* Lokaler Ablage-Server: nur aktiv, wenn die App vom lokalen Server (http, kein GitHub Pages) geladen wurde.
-   Dann werden die Scans an denselben Server (…/upload) geschickt und landen lokal im Ordner Lieferant/Monat. */
-const LOCAL_MODE = location.protocol==="http:" && !/github\.io$/i.test(location.hostname);
-const UPLOAD_URL = location.origin + "/upload";
+/* Lieferschein-Scans gehen in den Supabase-Speicher (privater Bucket), Ordner Lieferant/Monat.
+   Eine automatische lokale Kopie zieht ein separates Skript (Lieferschein-Sync.ps1). */
+const SCAN_BUCKET = "lieferscheine";
 
 const db=window.supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
 const $=(id)=>document.getElementById(id);
@@ -277,6 +276,7 @@ function fileToContent(f){
 /* ---- Claude-Extraktion ---- */
 const SCHEMA={type:"object",properties:{
   sender:{type:"string",description:"Lieferant/Absender des Lieferscheins, sonst 'k.A.'"},
+  lieferscheinNummer:{type:"string",description:"Die Lieferscheinnummer/Belegnummer des Lieferscheins (meist oben, z. B. „Lieferschein-Nr. 12345“), sonst ''"},
   items:{type:"array",items:{type:"object",properties:{
     artikelNummer:{type:"string",description:"Beste Wahl für die Artikelnummer des Lieferanten (unter der DIESER Lieferant den Artikel führt), sonst 'k.A.'"},
     nummern:{type:"array",items:{type:"string"},description:"ALLE in dieser Zeile sichtbaren Nummern/Codes: Artikelnummer, Bestellnummer, Referenznummer, EAN/GTIN usw. — NICHT die Positions-/Zeilennummer und NICHT die Menge"},
@@ -286,7 +286,7 @@ const SCHEMA={type:"object",properties:{
 },required:["sender","items"],additionalProperties:false};
 
 const EXTRACT_PROMPT=
-"Dies ist ein Lieferschein (evtl. mehrere Seiten/Fotos). Extrahiere den Lieferanten/Absender und ALLE echten Warenpositionen (tatsächlich gelieferte Artikel/Produkte).\n\n"+
+"Dies ist ein Lieferschein (evtl. mehrere Seiten/Fotos). Extrahiere den Lieferanten/Absender, die Lieferscheinnummer (Belegnummer) und ALLE echten Warenpositionen (tatsächlich gelieferte Artikel/Produkte).\n\n"+
 "Pro Position: 'artikelNummer' = die Artikelnummer des Lieferanten (die Nummer, unter der DIESER Lieferant den Artikel führt). Zusätzlich in 'nummern' ALLE weiteren auf der Zeile sichtbaren Nummern/Codes (Bestellnummer, Referenz, EAN/GTIN …). In 'nummern' NICHT die Positions-/Zeilennummer und NICHT die Menge aufnehmen. Außerdem 'bezeichnung' und die gelieferte 'menge'.\n\n"+
 "KEINE Positionen aufnehmen (komplett ignorieren), die keine gelieferte Ware sind – zum Beispiel: Rabatt, Discount, Skonto, Nachlass, Gutschrift; Versand, Fracht, Porto, Verpackung, Verpackungskosten, Euro-Palette/Palette, Leergut, Pfand; Mindermengenzuschlag, Bearbeitungs-/Servicegebühr; Zwischensumme, Gesamtsumme, Netto, Brutto, MwSt./Steuer sowie Kopf- und Fußzeilen.";
 
@@ -390,7 +390,7 @@ function fmtNum(n){ n=Number(n); return Number.isFinite(n)?(Number.isInteger(n)?
 function fmtDate(iso){ try{ const d=new Date(iso); return String(d.getDate()).padStart(2,"0")+"."+String(d.getMonth()+1).padStart(2,"0")+"."; }catch(e){ return ""; } }
 
 /* ---- Abgleich ---- */
-let ROWS=[], SENDER="";
+let ROWS=[], SENDER="", LSNR="";
 function classify(it){
   const senderTl=normLief(SENDER);
   // Kandidaten: Hauptnummer + alle 'nummern', normalisiert, ab 3 Zeichen
@@ -414,6 +414,7 @@ function classify(it){
 }
 function match(data){
   SENDER=data.sender||"";
+  LSNR=clean(data.lieferscheinNummer)||"";
   const items=(data.items||[]).filter(it=>clean(it.bezeichnung));
   ROWS=items.map(it=>{ const c=classify(it); return {it,status:c.status,art:c.art,note:c.note,orders:[]}; });
   ROWS.forEach(attachOrders);
@@ -550,6 +551,7 @@ function render(){
       : '<span class="muted">ℹ ohne App-Bestellung (z. B. Würth/Amazon/Ebay) – kein Abgleich nötig</span>';
   } else { $("orderInfo").innerHTML=""; }
   if($("archLief") && !$("archLief").value) $("archLief").value=SENDER||"";
+  if($("archLsnr") && !$("archLsnr").value) $("archLsnr").value=LSNR||"";
   $("resultCard").classList.remove("hidden");
   $("resultCard").scrollIntoView({behavior:"smooth"});
 }
@@ -766,10 +768,16 @@ function renderToday(){
 }
 
 /* ---- Wareneingang ablegen: Scans lokal hochladen + Liste in Supabase ---- */
-function fileToUploadB64(f){
+function safeName(s){
+  s=String(s==null?"":s).replace(/[\\\/\r\n\t<>:"|?*]+/g," ").replace(/\s+/g," ").trim();
+  s=s.replace(/ /g,"_");
+  if(s.length>60) s=s.slice(0,60).replace(/_+$/,"");
+  return s||"Unbekannt";
+}
+function fileToUploadBlob(f){
   return new Promise((resolve,reject)=>{
     if(/pdf$/i.test(f.type)||/\.pdf$/i.test(f.name)){
-      const r=new FileReader(); r.onload=()=>resolve({b64:String(r.result).split(",")[1],ext:"pdf",filename:f.name||"scan.pdf"}); r.onerror=reject; r.readAsDataURL(f); return;
+      resolve({blob:f,ext:"pdf",contentType:"application/pdf"}); return;   // PDF unverändert hochladen
     }
     const img=new Image();
     img.onload=()=>{
@@ -777,8 +785,7 @@ function fileToUploadB64(f){
       if(Math.max(w,h)>max){ const s=max/Math.max(w,h); w=Math.round(w*s); h=Math.round(h*s); }
       const c=document.createElement("canvas"); c.width=w; c.height=h;
       c.getContext("2d").drawImage(img,0,0,w,h);
-      const durl=c.toDataURL("image/jpeg",0.85);
-      resolve({b64:durl.split(",")[1],ext:"jpg",filename:f.name||"scan.jpg"});
+      c.toBlob(b=>{ b?resolve({blob:b,ext:"jpg",contentType:"image/jpeg"}):reject(new Error("Bild-Encoding fehlgeschlagen")); },"image/jpeg",0.85);
     };
     img.onerror=reject; img.src=URL.createObjectURL(f);
   });
@@ -789,40 +796,54 @@ async function saveWareneingang(){
   btn.disabled=true; btn.innerHTML='<span class="spin"></span> speichern…'; st.textContent="";
   const lieferant=($("archLief").value.trim())||SENDER||"Unbekannt";
   const datumISO=new Date().toISOString().slice(0,10);
-  let dateien=[], uploadWarn="";
+  let dateien=[];
   try{
-    if(LOCAL_MODE){
-      let seite=1;
-      for(const f of FILES){
-        const u=await fileToUploadB64(f);
-        const resp=await fetch(UPLOAD_URL,{method:"POST",headers:{"content-type":"application/json"},
-          body:JSON.stringify({lieferant,datum:datumISO,seite:seite++,filename:u.filename,dataB64:u.b64})});
-        if(!resp.ok) throw new Error("Server "+resp.status);
-        const j=await resp.json().catch(()=>null);
-        if(j&&j.path) dateien.push(j.path);
-      }
-    } else {
-      uploadWarn=" · Bilder nicht abgelegt (App nicht vom lokalen Server geladen)";
+    let seite=1;
+    const yyyymm=datumISO.slice(0,7);
+    const safeLief=safeName(lieferant);
+    const stampBase=new Date().toISOString().replace(/[:.]/g,"-").replace("Z","");
+    for(const f of FILES){
+      const u=await fileToUploadBlob(f);
+      const path=safeLief+"/"+yyyymm+"/"+stampBase+"_"+(seite++)+"."+u.ext;
+      const {error}=await db.storage.from(SCAN_BUCKET).upload(path,u.blob,{contentType:u.contentType,upsert:true});
+      if(error) throw error;
+      dateien.push(path);
     }
   }catch(e){
     btn.disabled=false; btn.innerHTML='🗄️ Wareneingang speichern';
-    st.innerHTML='<span style="color:#f87171">Bild-Upload fehlgeschlagen: '+esc(e.message||e)+'. Läuft der lokale Server?</span>';
+    st.innerHTML='<span style="color:#f87171">Scan-Upload fehlgeschlagen: '+esc(e.message||e)+' (Bucket „'+esc(SCAN_BUCKET)+'“ angelegt?)</span>';
     return;
   }
-  const positionen=ROWS.map(r=>({bezeichnung:clean(r.it.bezeichnung),nummern:bestNums(r.it),menge:clean(r.it.menge),status:r.status,mv_code:r.art?r.art.mv_code:null}));
-  const abgeglichen=ROWS.some(r=>r.status==="ok"||r.status==="angelegt");
+  // Eine Zeile JE POSITION (Artikel); gemeinsame Lieferschein-Infos werden wiederholt.
+  const common={
+    lieferschein_nr:$("archLsnr").value.trim()||null,
+    lieferant:lieferant||null,
+    lagerort:$("archLager").value.trim()||null,
+    kommission:$("archKomm").value.trim()||null,
+    notiz:$("archNotiz").value.trim()||null,
+    dateien
+  };
+  let rows=ROWS.map(r=>Object.assign({},common,{
+    mv_nr:(r.art&&r.art.mv_nr!=null)?r.art.mv_nr:null,
+    mv_code:(r.art&&r.art.mv_code)?r.art.mv_code:null,
+    bezeichnung:clean(r.it.bezeichnung)||null,
+    art_nr_lieferant:(r.art&&r.art.art_nr_lieferant)?r.art.art_nr_lieferant:null,
+    art_nr_hersteller:(r.art&&r.art.art_nr_hersteller)?r.art.art_nr_hersteller:null,
+    nummern:bestNums(r.it).join(", ")||null,
+    menge:clean(r.it.menge)||null,
+    status:r.status,
+    abgeglichen:(r.status==="ok"||r.status==="angelegt")
+  }));
+  if(!rows.length){  // nur ein Scan ohne erkannte Positionen → eine Kopfzeile, damit der Scan referenziert bleibt
+    rows=[Object.assign({},common,{mv_nr:null,mv_code:null,bezeichnung:null,art_nr_lieferant:null,art_nr_hersteller:null,nummern:null,menge:null,status:null,abgeglichen:false})];
+  }
   let listWarn="";
   try{
-    const {error}=await db.from("wareneingang").insert({
-      lieferant, positionen, dateien,
-      lagerort:$("archLager").value.trim()||null,
-      kommission:$("archKomm").value.trim()||null,
-      abgeglichen, notiz:$("archNotiz").value.trim()||null
-    });
+    const {error}=await db.from("wareneingang").insert(rows);
     if(error) throw error;
-  }catch(e){ listWarn=" · Liste nicht gespeichert (Tabelle „wareneingang“ noch nicht angelegt)"; }
+  }catch(e){ listWarn=" · Liste nicht gespeichert ("+esc(e.message||e)+")"; }
   btn.disabled=false; btn.innerHTML='🗄️ Wareneingang speichern';
-  const okMsg=(dateien.length?(dateien.length+" Scan(s) lokal abgelegt"):"gespeichert")+uploadWarn+listWarn;
+  const okMsg=(dateien.length?(dateien.length+" Scan(s) abgelegt"):"gespeichert")+" · "+rows.length+" Position(en) in der Liste"+listWarn;
   st.innerHTML='<span style="color:#4ade80">✔ '+esc(okMsg)+'</span>';
   toast("Wareneingang gespeichert.");
 }
@@ -832,7 +853,7 @@ $("archSave").addEventListener("click",saveWareneingang);
 $("nextBtn").addEventListener("click",()=>{
   FILES=[]; renderThumbs();
   ROWS=[]; SENDER="";
-  ["archLief","archLager","archKomm","archNotiz"].forEach(id=>{ if($(id)) $(id).value=""; });
+  ["archLief","archLsnr","archLager","archKomm","archNotiz"].forEach(id=>{ if($(id)) $(id).value=""; });
   $("archStatus").textContent=""; $("archSave").disabled=false; $("archSave").innerHTML='🗄️ Wareneingang speichern';
   $("orderInfo").innerHTML="";
   $("resultCard").classList.add("hidden");
