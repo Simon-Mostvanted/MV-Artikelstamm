@@ -35,6 +35,13 @@
   .res .r .g{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .hint{background:rgba(59,130,246,.08);border:1px solid rgba(59,130,246,.3);border-radius:8px;padding:10px 12px;font-size:12.5px;color:#bcd4ff;margin-top:10px}
   code{background:var(--chip);padding:1px 5px;border-radius:4px}
+  #items{margin-top:12px;display:flex;flex-direction:column;gap:6px}
+  .qrow{display:flex;align-items:center;gap:10px;background:var(--chip);border:1px solid var(--line);border-radius:7px;padding:6px 10px;font-size:12.5px}
+  .qrow .qcode{min-width:78px;font-weight:700}
+  .qrow .qbez{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .qrow .qn{color:var(--muted);white-space:nowrap}
+  .qrow .qn input{width:54px;background:var(--panel2);border:1px solid var(--line2);color:var(--text);border-radius:6px;padding:4px 6px;font-size:13px;margin-left:3px}
+  .qrow .qx{padding:4px 10px}
 
   /* ---------- Etikett 62 x 18 mm ---------- */
   #sheet{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px}
@@ -103,6 +110,7 @@
       <button class="btn ghost" id="clearBtn" type="button">Liste leeren</button>
       <button class="btn ok big" id="printBtn" type="button">🖨 Drucken</button>
     </div>
+    <div id="items"></div>
     <div class="hint">
       <b>Einmalige Kalibrierung im Druckdialog (Brother QL-820NWBc):</b><br>
       • Papier/Medium: <code>62mm</code> Endlos (DK-22205) &nbsp;•&nbsp; Länge: <code>18 mm</code><br>
@@ -172,7 +180,7 @@ async function loadQueue(){
   render(); toast((data?data.length:0)+" aus Warteschlange geladen (max. 250)");
 }
 
-function labelHTML(a,i){
+function labelHTML(a,svgId){
   const infos=[];
   if(a.lagerort) infos.push(esc(a.lagerort));
   return `<div class="label">
@@ -182,27 +190,73 @@ function labelHTML(a,i){
       ${a.mass?`<div class="mass">${esc(a.mass)}</div>`:""}
       ${infos.length?`<div class="info">${infos.join(" · ")}</div>`:""}
     </div>
-    <div class="bcCol"><svg id="bc${i}"></svg><span class="code">${esc(a.mv_code||"")}</span></div>
+    <div class="bcCol"><svg id="${svgId}"></svg><span class="code">${esc(a.mv_code||"")}</span></div>
   </div>`;
 }
-function render(){
-  $("sheet").innerHTML = LIST.map((a,i)=>labelHTML(a,i)).join("");
-  LIST.forEach((a,i)=>{ try{ var bd=String(a.mv_code||"").replace(/\D/g,"")||String(a.mv_code||""); JsBarcode("#bc"+i, bd, {format:"CODE128",displayValue:false,margin:0,width:2.1,height:60}); }catch(e){} });
-  $("printCount").textContent = LIST.length;
+function itemsHTML(){
+  if(!LIST.length) return `<div class="muted small">Liste ist leer.</div>`;
+  return LIST.map((a,i)=>
+    `<div class="qrow"><b class="qcode">${esc(a.mv_code||"")}</b>`+
+    `<span class="qbez">${esc(a.bezeichnung||"")}</span>`+
+    `<span class="qn">Stück ×<input type="number" min="1" max="199" value="${parseInt(a.menge,10)||1}" data-i="${i}" class="qmenge"></span>`+
+    `<button class="btn ghost qx" data-i="${i}" title="Aus der Liste entfernen">✕</button></div>`
+  ).join("");
+}
+function renderSheet(){
+  let html="", jobs=[];
+  LIST.forEach((a,i)=>{
+    const n=Math.max(1,parseInt(a.menge,10)||1);
+    for(let k=0;k<n;k++){ const id="bc_"+i+"_"+k; jobs.push([id,a.mv_code]); html+=labelHTML(a,id); }
+  });
+  $("sheet").innerHTML=html;
+  jobs.forEach(([id,code])=>{ try{ var bd=String(code||"").replace(/\D/g,"")||String(code||""); JsBarcode("#"+id, bd, {format:"CODE128",displayValue:false,margin:0,width:2.1,height:60}); }catch(e){} });
+  $("printCount").textContent = LIST.reduce((s,a)=>s+Math.max(1,parseInt(a.menge,10)||1),0);
+}
+function render(){ $("items").innerHTML=itemsHTML(); renderSheet(); }
+
+// Zentrale Druckliste laden (aus dem Wareneingang befüllt)
+async function loadDruckliste(){
+  try{
+    const { data, error } = await db.from("druckliste").select("id,mv_code,bezeichnung,mass,lagerort,menge").order("created_at",{ascending:true});
+    if(error) throw error;
+    const have=seen();
+    (data||[]).forEach(d=>{ if(!have.has(d.mv_code)) LIST.push({mv_code:d.mv_code,bezeichnung:d.bezeichnung,mass:d.mass,lagerort:d.lagerort,menge:d.menge||1,queueId:d.id}); });
+    if(data&&data.length) render();
+  }catch(e){ /* Tabelle druckliste evtl. noch nicht angelegt → ignorieren */ }
 }
 
 $("searchBtn").addEventListener("click",search);
 $("search").addEventListener("keydown",e=>{ if(e.key==="Enter") search(); });
 $("pasteBtn").addEventListener("click",()=>{ addManyCodes($("pasteCodes").value.split(/[\n,;]+/)); });
 $("queueBtn").addEventListener("click",loadQueue);
-$("clearBtn").addEventListener("click",()=>{ LIST=[]; render(); $("results").innerHTML=""; });
+$("clearBtn").addEventListener("click",async ()=>{
+  const ids=LIST.map(x=>x.queueId).filter(Boolean);
+  LIST=[]; render(); $("results").innerHTML="";
+  if(ids.length){ try{ await db.from("druckliste").delete().in("id",ids); }catch(e){} }   // zentrale Liste auch leeren
+});
 $("printBtn").addEventListener("click",()=>{ if(!LIST.length){ toast("Liste ist leer.",true); return; } window.print(); });
 $("testBtn").addEventListener("click",()=>{
-  LIST.push({mv_code:"MV-10001",bezeichnung:"NT-Cutter BD100 Klingen 30°",mass:"9 mm",lagerort:"R3-B2"});
+  LIST.push({mv_code:"MV-10001",bezeichnung:"NT-Cutter BD100 Klingen 30°",mass:"9 mm",lagerort:"R3-B2",menge:1});
   render();
 });
 
+// Stückzahl ändern / einzelnes Etikett entfernen (Verwaltungsliste)
+$("items").addEventListener("input",e=>{
+  const el=e.target.closest(".qmenge"); if(!el) return;
+  const i=+el.dataset.i; if(!LIST[i]) return;
+  const v=Math.max(1,parseInt(el.value,10)||1); LIST[i].menge=v;
+  renderSheet();                                    // nur Vorschau+Anzahl neu -> Eingabefokus bleibt
+  if(LIST[i].queueId){ db.from("druckliste").update({menge:v}).eq("id",LIST[i].queueId).then(()=>{},()=>{}); }
+});
+$("items").addEventListener("click",e=>{
+  const x=e.target.closest(".qx"); if(!x) return;
+  const i=+x.dataset.i; const it=LIST[i]; if(!it) return;
+  LIST.splice(i,1); render();
+  if(it.queueId){ db.from("druckliste").delete().eq("id",it.queueId).then(()=>{},()=>{}); }   // auch zentral entfernen
+});
+
 ping();
+loadDruckliste();
 </script>
 </body>
 </html>
