@@ -288,7 +288,7 @@ const SCHEMA={type:"object",properties:{
 const EXTRACT_PROMPT=
 "Dies ist ein Lieferschein (evtl. mehrere Seiten/Fotos). Extrahiere den Lieferanten/Absender, die Lieferscheinnummer (Belegnummer) und ALLE echten Warenpositionen (tatsächlich gelieferte Artikel/Produkte).\n\n"+
 "Pro Position: 'artikelNummer' = die Artikelnummer des Lieferanten (die Nummer, unter der DIESER Lieferant den Artikel führt). Zusätzlich in 'nummern' ALLE weiteren auf der Zeile sichtbaren Nummern/Codes (Bestellnummer, Referenz, EAN/GTIN …). In 'nummern' NICHT die Positions-/Zeilennummer und NICHT die Menge aufnehmen. Außerdem 'bezeichnung' und die gelieferte 'menge'.\n\n"+
-"KEINE Positionen aufnehmen (komplett ignorieren), die keine gelieferte Ware sind – zum Beispiel: Rabatt, Discount, Skonto, Nachlass, Gutschrift; Versand, Fracht, Porto, Verpackung, Verpackungskosten, Euro-Palette/Palette, Leergut, Pfand; Mindermengenzuschlag, Bearbeitungs-/Servicegebühr; Zwischensumme, Gesamtsumme, Netto, Brutto, MwSt./Steuer sowie Kopf- und Fußzeilen.";
+"KEINE Positionen aufnehmen (komplett ignorieren), die keine gelieferte Ware sind – zum Beispiel: Rabatt, Discount, Skonto, Nachlass, Gutschrift; Versand, Fracht, Anlieferung, Lieferung, Anlieferpauschale, Zustellung, Transport, Anfahrt, Porto, Verpackung, Verpackungskosten, Euro-Palette/Palette, Leergut, Pfand; Mindermengenzuschlag, Bearbeitungs-/Servicegebühr; Zwischensumme, Gesamtsumme, Netto, Brutto, MwSt./Steuer sowie Kopf- und Fußzeilen. Ignoriere generell ALLE Liefer-, Transport-, Anfahrts- und Servicekosten-Zeilen, auch wenn sie ähnlich oder anders benannt sind – nur tatsächlich gelieferte Artikel/Produkte zählen.";
 
 function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
 
