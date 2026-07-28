@@ -94,7 +94,7 @@
     <span class="logo">MV</span>
     <div>MV-Artikelmanager<small>Anlegen aus Rechnung · manuell · bearbeiten</small></div>
   </div>
-  <div class="status"><a href="index.html" class="btn ghost" style="text-decoration:none;padding:5px 11px;margin-right:8px">&larr; Start</a>
+  <div class="status"><button type="button" onclick="location.replace(location.pathname+'?r='+Date.now())" title="App neu laden (Cache umgehen)" style="background:transparent;border:1px solid #3f4d63;color:#94a3b8;border-radius:8px;padding:5px 10px;font-size:13px;cursor:pointer;margin-right:8px">🔄 Neu laden</button><a href="index.html" class="btn ghost" style="text-decoration:none;padding:5px 11px;margin-right:8px">&larr; Start</a>
     <span><span id="dotSb" class="dot off"></span><span id="sbTxt">Stamm nicht geladen</span></span>
     <span><span id="dotKey" class="dot off"></span>Claude-Key</span>
   </div>
@@ -499,9 +499,10 @@ function readXlsx(file){
 function refreshCapture(){
   const n=CANDIDATES.length;
   $("capCount").innerHTML = n
-    ? "<b>"+n+"</b> Artikel erfasst. &nbsp; <button class='btn' id='goMatch' type='button'>Weiter zum Abgleich →</button>"
+    ? "<b>"+n+"</b> Artikel erfasst. &nbsp; <button class='btn' id='goMatch' type='button'>Weiter zum Abgleich →</button> &nbsp; <button class='btn ghost' id='clearCapBtn' type='button'>🗑 Erfassung leeren</button>"
     : "";
   const b=$("goMatch"); if(b) b.addEventListener("click", runMatch);
+  const cb=$("clearCapBtn"); if(cb) cb.addEventListener("click", clearCapture);
   const pv=$("capPreview");
   if(n){
     let h="<thead><tr><th>#</th><th>Bezeichnung</th><th>Lieferant</th><th>Art.nr.Lief.</th><th>Art.nr.Herst./EAN</th><th>EK</th><th>Quelle</th><th></th></tr></thead><tbody>";
@@ -511,6 +512,19 @@ function refreshCapture(){
     h+="</tbody>"; $("capTable").innerHTML=h; pv.classList.remove("hidden");
     $("capTable").querySelectorAll("button[data-crm]").forEach(bt=>bt.addEventListener("click",()=>{ CANDIDATES.splice(+bt.dataset.crm,1); refreshCapture(); }));
   } else { pv.classList.add("hidden"); }
+}
+
+/* Alles aus der Erfassung entfernen (Kandidaten + Formularfelder + Datei-Liste) */
+function clearCapture(){
+  CANDIDATES=[]; NEWROWS=[]; SKIPPED=[];
+  MANUAL_FIELDS.forEach(id=>{ const el=$(id); if(el) el.value=""; });
+  const fl=$("fileList"); if(fl) fl.innerHTML="";
+  const pi=$("pdfInput"); if(pi) pi.value=""; const xi=$("xlsxInput"); if(xi) xi.value="";
+  $("matchCard").classList.add("hidden");
+  $("commitCard").classList.add("hidden");
+  const rw=$("resultWrap"); if(rw) rw.classList.add("hidden");
+  refreshCapture();
+  toast("Erfassung geleert.");
 }
 
 /* ---------- Abgleich ---------- */

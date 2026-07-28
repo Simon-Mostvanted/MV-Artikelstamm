@@ -95,7 +95,10 @@
 <body>
 <header>
   <div class="brand"><span class="logo">MV</span><div>Wareneingang<small>Lieferschein → Abgleich</small></div></div>
-  <a class="back" href="index.html">← Start</a>
+  <div style="display:flex;gap:8px;align-items:center">
+    <button type="button" onclick="location.replace(location.pathname+'?r='+Date.now())" title="App neu laden (Cache umgehen)" style="background:transparent;border:1px solid #3f4d63;color:#94a3b8;border-radius:8px;padding:6px 10px;font-size:13px;cursor:pointer;white-space:nowrap">🔄 Neu laden</button>
+    <a class="back" href="index.html">← Start</a>
+  </div>
 </header>
 
 <main>
@@ -804,7 +807,7 @@ async function saveWareneingang(){
   btn.disabled=true; btn.innerHTML='<span class="spin"></span> speichern…'; st.textContent="";
   const lieferant=($("archLief").value.trim())||SENDER||"Unbekannt";
   const datumISO=new Date().toISOString().slice(0,10);
-  let dateien=[];
+  let dateien=[], uploadWarn="";
   try{
     let seite=1;
     const yyyymm=datumISO.slice(0,7);
@@ -818,9 +821,8 @@ async function saveWareneingang(){
       dateien.push(path);
     }
   }catch(e){
-    btn.disabled=false; btn.innerHTML='🗄️ Wareneingang speichern';
-    st.innerHTML='<span style="color:#f87171">Scan-Upload fehlgeschlagen: '+esc(e.message||e)+' (Bucket „'+esc(SCAN_BUCKET)+'“ angelegt?)</span>';
-    return;
+    // Scan-Upload gescheitert -> NICHT abbrechen: Wareneingangsliste + Etiketten werden trotzdem gespeichert.
+    uploadWarn=" · ⚠ Scan nicht abgelegt ("+esc(e.message||e)+")";
   }
   // Eine Zeile JE POSITION (Artikel); gemeinsame Lieferschein-Infos werden wiederholt.
   const common={
@@ -869,7 +871,7 @@ async function saveWareneingang(){
   }catch(e){ /* Druckliste ist optional – blockiert das Speichern nicht */ }
 
   btn.disabled=false; btn.innerHTML='🗄️ Wareneingang speichern';
-  const okMsg=(dateien.length?(dateien.length+" Scan(s) abgelegt"):"gespeichert")+" · "+rows.length+" Position(en) in der Liste"+(druckN?" · "+druckN+" Etikett(en) in die Druckliste":"")+listWarn;
+  const okMsg=(dateien.length?(dateien.length+" Scan(s) abgelegt"):"gespeichert")+" · "+rows.length+" Position(en) in der Liste"+(druckN?" · "+druckN+" Etikett(en) in die Druckliste":"")+uploadWarn+listWarn;
   st.innerHTML='<span style="color:#4ade80">✔ '+esc(okMsg)+'</span>';
   toast("Wareneingang gespeichert.");
 }
