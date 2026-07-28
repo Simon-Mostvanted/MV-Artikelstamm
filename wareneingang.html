@@ -251,7 +251,7 @@ function renderThumbs(){
   }).join("");
   $("go").innerHTML = FILES.length ? '<button class="btn" id="readBtn" type="button">🔍 '+FILES.length+' Seite(n) auslesen &amp; abgleichen</button> <button class="btn secondary" id="clearBtn" type="button" style="margin-top:8px">Auswahl verwerfen</button>' : '';
   if($("readBtn")) $("readBtn").addEventListener("click",runExtract);
-  if($("clearBtn")) $("clearBtn").addEventListener("click",()=>{FILES=[];renderThumbs();$("resultCard").classList.add("hidden");});
+  if($("clearBtn")) $("clearBtn").addEventListener("click",resetAll);
 }
 
 /* ---- Bild verkleinern (Handyfotos) ---- */
@@ -415,6 +415,7 @@ function classify(it){
 function match(data){
   SENDER=data.sender||"";
   LSNR=clean(data.lieferscheinNummer)||"";
+  resetArchiveForNote();   // Ablage-Felder immer auf den aktuellen Lieferschein setzen (kein Rest vom vorigen)
   const items=(data.items||[]).filter(it=>clean(it.bezeichnung));
   ROWS=items.map(it=>{ const c=classify(it); return {it,status:c.status,art:c.art,note:c.note,orders:[]}; });
   ROWS.forEach(attachOrders);
@@ -849,16 +850,26 @@ async function saveWareneingang(){
 }
 $("archSave").addEventListener("click",saveWareneingang);
 
-/* ---- Nächster Lieferschein (Scan-Ansicht leeren, Kontrollliste bleibt) ---- */
-$("nextBtn").addEventListener("click",()=>{
+/* ---- Zurücksetzen ---- */
+// Alles leeren (für „Auswahl verwerfen" und „nächster Lieferschein")
+function resetAll(){
   FILES=[]; renderThumbs();
-  ROWS=[]; SENDER="";
+  ROWS=[]; SENDER=""; LSNR="";
   ["archLief","archLsnr","archLager","archKomm","archNotiz"].forEach(id=>{ if($(id)) $(id).value=""; });
-  $("archStatus").textContent=""; $("archSave").disabled=false; $("archSave").innerHTML='🗄️ Wareneingang speichern';
-  $("orderInfo").innerHTML="";
+  if($("archStatus")) $("archStatus").textContent="";
+  if($("archSave")){ $("archSave").disabled=false; $("archSave").innerHTML='🗄️ Wareneingang speichern'; }
+  if($("orderInfo")) $("orderInfo").innerHTML="";
   $("resultCard").classList.add("hidden");
-  window.scrollTo({top:0,behavior:"smooth"});
-});
+}
+// Ablage-Block auf den GERADE ausgelesenen Lieferschein setzen (Lieferant/Nr. aus Extraktion, Rest leer)
+function resetArchiveForNote(){
+  if($("archLief")) $("archLief").value=SENDER||"";
+  if($("archLsnr")) $("archLsnr").value=LSNR||"";
+  ["archLager","archKomm","archNotiz"].forEach(id=>{ if($(id)) $(id).value=""; });
+  if($("archStatus")) $("archStatus").textContent="";
+  if($("archSave")){ $("archSave").disabled=false; $("archSave").innerHTML='🗄️ Wareneingang speichern'; }
+}
+$("nextBtn").addEventListener("click",()=>{ resetAll(); window.scrollTo({top:0,behavior:"smooth"}); });
 
 setBanner();
 loadStamm();
