@@ -350,7 +350,7 @@ async function extractInvoice(base64, apiKey){
 IGNORIERE Versandkosten, Porto, Fracht, Verpackung, Bearbeitungs-/Servicegebühren, Pauschalen, Rabatte, Skonto, Gutschriften und negative Beträge – das sind KEINE Artikel.
 Nutze für jeden Posten: artikelNummer (Lieferantennummer, sonst 'k.A.'), bezeichnung, preis (Einzelpreis netto). Falls eindeutig erkennbar zusätzlich herstellerNummer/EAN, hersteller, mass, farbe – sonst leeren String.`;
   const system = `Du bist ein hochpräziser Assistent für Rechnungsdaten-Extraktion. Extrahiere ausschließlich echte Waren/Kern-Dienstleistungen; niemals Gebühren, Pauschalen, Rabatte oder Gutschriften. Antworte ausschließlich mit dem geforderten JSON.`;
-  const body = { model:CLAUDE_MODEL, max_tokens:8000, system,
+  const body = { model:CLAUDE_MODEL, max_tokens:32000, system,
     messages:[{role:"user",content:[
       {type:"document",source:{type:"base64",media_type:"application/pdf",data:base64}},
       {type:"text",text:promptText}
@@ -369,11 +369,13 @@ Nutze für jeden Posten: artikelNummer (Lieferantennummer, sonst 'k.A.'), bezeic
     if(resp.status===529||/overloaded/i.test(msg)) throw new Error("Claude momentan überlastet – gleich erneut.");
     throw new Error(msg); }
   if(json&&json.stop_reason==="refusal") throw new Error("Anfrage vom Modell abgelehnt.");
+  if(json&&json.stop_reason==="max_tokens") throw new Error("Rechnung zu umfangreich – die Antwort wurde abgeschnitten. Bitte Rechnung aufteilen oder max_tokens erhöhen.");
   const parts = (json&&Array.isArray(json.content))?json.content:[];
   let text = parts.filter(b=>b.type==="text").map(b=>b.text||"").join("");
   if(!text) throw new Error("Keine Antwort von Claude.");
   text=text.trim(); if(text.includes("```")){ const m=text.match(/```(?:json)?\s*([\s\S]*?)\s*```/); if(m&&m[1]) text=m[1].trim(); }
-  return JSON.parse(text);
+  try{ return JSON.parse(text); }
+  catch(e){ throw new Error("Antwort war unvollständig/kein gültiges JSON – vermutlich Rechnung zu groß."); }
 }
 
 const fileRows = {}; // fileId -> DOM
