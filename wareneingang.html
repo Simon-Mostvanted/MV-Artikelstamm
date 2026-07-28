@@ -127,7 +127,7 @@
     <div class="summary" id="summary"></div>
     <div id="orderInfo" class="small" style="margin:0 0 10px"></div>
     <div id="positions"></div>
-    <div class="small muted" style="margin-top:6px">✅ = schon im Stamm (MV-Nr.) · 🆕 = neu (anlegen) · ⚠️ = gleiche Nr., anderer Lieferant (prüfen) · 🧪 = in dieser Sitzung testweise angelegt</div>
+    <div class="small muted" style="margin-top:6px">✅ = schon im Stamm (MV-Nr.) · 🆕 = neu (anlegen) · ⚠️ = gleiche Nr., anderer Lieferant (prüfen) · ➕ = gerade neu angelegt</div>
 
     <div id="archiveBlock" style="margin-top:14px;border-top:1px solid var(--line);padding-top:12px">
       <h2 style="font-size:14px;margin:0 0 8px">3 · Wareneingang ablegen</h2>
@@ -167,8 +167,11 @@ const MV_LOGO="data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEAkACQAAD/2wBDAAIBAQIBAQ
                      (MV-9xxxxx, verbraucht keine echten MV-Nummern).
    Zum Scharfschalten später: TEST_MODE=false  → schreibt in "artikel".
    ============================================================ */
-const TEST_MODE = true;
+const TEST_MODE = false;
 const WRITE_TABLE = TEST_MODE ? "artikel_test" : "artikel";
+const WRITE_SRC   = TEST_MODE ? "test" : "echt";     // Herkunft-Markierung neu angelegter Artikel
+const NEW_ICON    = TEST_MODE ? "🧪" : "➕";          // Badge für „gerade angelegt"
+const ANLEGEN_BTN = TEST_MODE ? "💾 In Test-Tabelle anlegen" : "💾 In den Stamm anlegen";
 
 /* Lieferschein-Scans gehen in den Supabase-Speicher (privater Bucket), Ordner Lieferant/Monat.
    Eine automatische lokale Kopie zieht ein separates Skript (Lieferschein-Sync.ps1). */
@@ -230,13 +233,17 @@ async function loadStamm(){
     const echt=await pageAll("artikel");
     echt.forEach(r=>indexRow(r,"echt")); echtN=echt.length;
   }catch(e){ $("dotSb").className="dot err"; $("sbTxt").textContent="Stamm-Fehler: "+(e.message||e); return; }
-  // Test-Tabelle zusätzlich einlesen (damit dieselbe Neuanlage nicht doppelt entsteht)
-  try{
-    const test=await pageAll("artikel_test");
-    test.forEach(r=>indexRow(r,"test")); testN=test.length; TEST_TABLE_OK=true;
-  }catch(e){ TEST_TABLE_OK=false; /* Tabelle existiert (noch) nicht → ignorieren */ }
+  // Test-Tabelle NUR im Testmodus zusätzlich einlesen; live zählt allein der echte Stamm
+  if(TEST_MODE){
+    try{
+      const test=await pageAll("artikel_test");
+      test.forEach(r=>indexRow(r,"test")); testN=test.length; TEST_TABLE_OK=true;
+    }catch(e){ TEST_TABLE_OK=false; /* Tabelle existiert (noch) nicht → ignorieren */ }
+  } else {
+    TEST_TABLE_OK=true;   // live: Anlegen schreibt in den echten Stamm, immer möglich
+  }
   STAMM.loaded=true; $("dotSb").className="dot on";
-  $("sbTxt").textContent=echtN+" Artikel im Stamm"+(TEST_TABLE_OK?(" · "+testN+" in der Test-Tabelle"):"");
+  $("sbTxt").textContent=echtN+" Artikel im Stamm"+(TEST_MODE&&TEST_TABLE_OK?(" · "+testN+" in der Test-Tabelle"):"");
   setBanner();
 }
 
@@ -431,7 +438,7 @@ function posInner(r,i){
   let badge;
   if(r.status==="ok") badge='<span class="badge ok">✅ '+esc(r.art.mv_code)+'</span>';
   else if(r.status==="pruef") badge='<span class="badge pruef">⚠️ prüfen</span>';
-  else if(r.status==="angelegt") badge='<span class="badge angelegt">🧪 '+esc(r.art.mv_code)+'</span>';
+  else if(r.status==="angelegt") badge='<span class="badge angelegt">'+NEW_ICON+' '+esc(r.art.mv_code)+'</span>';
   else badge='<span class="badge neu">🆕 neu</span>';
 
   let meta=[];
@@ -440,7 +447,7 @@ function posInner(r,i){
     if(r.art.art_nr_lieferant) meta.push("Stamm-Art.nr.: "+esc(r.art.art_nr_lieferant));
     if(r.art.lagerort) meta.push("Lager: "+esc(r.art.lagerort));
     if(r.status==="ok") meta.push(r.art.etikettiert?"etikettiert ✓":"noch nicht etikettiert");
-    if(r.status==="angelegt") meta.push("angelegt in Test-Tabelle");
+    if(r.status==="angelegt") meta.push(TEST_MODE?"angelegt in Test-Tabelle":"neu angelegt");
   } else {
     const uniq=bestNums(r.it);
     if(uniq.length) meta.push("Erkannte Nr.: "+esc(uniq.join(", ")));
@@ -471,7 +478,7 @@ function posInner(r,i){
             '<div><label>Maße</label><input type="text" name="mass" value=""></div>'+
             '<div class="full"><label>Etikett-Typ</label><select name="etikett_typ"><option value="Artikel">Artikel</option><option value="Regal">Regal</option><option value="kein">kein</option></select></div>'+
           '</div>'+
-          '<button class="btn test saveBtn" type="button" style="margin-top:10px">💾 In Test-Tabelle anlegen</button>'+
+          '<button class="btn test saveBtn" type="button" style="margin-top:10px">'+ANLEGEN_BTN+'</button>'+
         '</div>';
     }
   }
@@ -732,14 +739,14 @@ async function doInsert(i, formEl, btn){
     const {data,error}=await db.from(WRITE_TABLE).insert(payload)
       .select("mv_nr,mv_code,art_nr_lieferant,art_nr_hersteller,lieferant,bezeichnung,lagerort,etikettiert,etikett_typ,mass,created_at").single();
     if(error) throw error;
-    indexRow(data,"test");                 // sofort in den In-Memory-Stamm → Folgepositionen erkennen ihn
+    indexRow(data,WRITE_SRC);              // sofort in den In-Memory-Stamm → Folgepositionen erkennen ihn
     ROWS[i].status="angelegt"; ROWS[i].art=data; ROWS[i].note="";
     attachOrders(ROWS[i]);                 // neue MV-Nr. → evtl. offene Bestellung zuordnen
     render();                              // Summary + Position neu zeichnen
     TODAY.unshift(data); renderToday();    // Kontrollliste sofort ergänzen
     toast("Angelegt: "+data.mv_code);
   }catch(e){
-    btn.disabled=false; btn.innerHTML='💾 In Test-Tabelle anlegen';
+    btn.disabled=false; btn.innerHTML=ANLEGEN_BTN;
     toast("Anlegen fehlgeschlagen: "+(e.message||e),true);
   }
 }
@@ -763,7 +770,7 @@ function renderToday(){
   $("todayCard").classList.remove("hidden");
   $("todayList").innerHTML=TODAY.map(r=>
     '<div class="pos angelegt"><div class="top"><div class="bez">'+esc(r.bezeichnung||"—")+'</div>'+
-    '<span class="badge angelegt">🧪 '+esc(r.mv_code)+'</span></div>'+
+    '<span class="badge angelegt">'+NEW_ICON+' '+esc(r.mv_code)+'</span></div>'+
     '<div class="meta">'+[r.lieferant?esc(r.lieferant):"", hhmm(r.created_at)+" Uhr"].filter(Boolean).join(" · ")+'</div></div>'
   ).join("");
 }
