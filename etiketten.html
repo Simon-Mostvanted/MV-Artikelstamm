@@ -30,7 +30,7 @@
   .btn.ok{background:var(--ok)} .btn.big{font-size:15px;padding:12px 22px}
   .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
   .muted{color:var(--muted)}.small{font-size:12px}
-  .res{margin-top:10px;display:flex;flex-direction:column;gap:5px;max-height:240px;overflow:auto}
+  .res{margin-top:10px;display:flex;flex-direction:column;gap:5px;max-height:55vh;overflow-y:auto}
   .res .r{display:flex;align-items:center;gap:10px;background:var(--chip);border:1px solid var(--line);border-radius:7px;padding:6px 10px;font-size:12.5px}
   .res .r .g{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .hint{background:rgba(59,130,246,.08);border:1px solid rgba(59,130,246,.3);border-radius:8px;padding:10px 12px;font-size:12.5px;color:#bcd4ff;margin-top:10px}
@@ -146,12 +146,12 @@ async function search(){
   const { data, error } = await db.from("artikel")
     .select("mv_code,bezeichnung,mass,lagerort,art_nr_lieferant,lieferant")
     .or(`mv_code.ilike.${like},bezeichnung.ilike.${like},art_nr_lieferant.ilike.${like}`)
-    .order("mv_nr",{ascending:true}).limit(25);
+    .order("mv_nr",{ascending:true}).limit(2000);
   if(error){ toast("Suchfehler: "+error.message,true); return; }
   const have=seen();
   $("results").innerHTML = (data&&data.length)? data.map(a=>{
     const inList=have.has(a.mv_code);
-    return `<div class="r"><b style="min-width:78px">${esc(a.mv_code)}</b><span class="g">${esc(a.bezeichnung||"")} <span class="muted">· ${esc(a.lieferant||"")}${a.art_nr_lieferant?" · "+esc(a.art_nr_lieferant):""}</span></span>`+
+    return `<div class="r"><b style="min-width:78px">${esc(a.mv_code)}</b><span class="g">${esc(a.bezeichnung||"")} <span class="muted">· ${esc(a.lieferant||"")}${a.mass?" · "+esc(a.mass):""}${a.art_nr_lieferant?" · "+esc(a.art_nr_lieferant):""}</span></span>`+
       (inList?`<span class="muted small">✓ in Liste</span>`:`<button class="btn" data-add='${esc(a.mv_code)}' style="padding:4px 10px">+ hinzufügen</button>`)+`</div>`;
   }).join("") : `<div class="muted small">Keine Treffer.</div>`;
   $("results").querySelectorAll("button[data-add]").forEach(b=>b.addEventListener("click",()=>{ addByCode(b.dataset.add); }));

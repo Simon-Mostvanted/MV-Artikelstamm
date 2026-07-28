@@ -223,7 +223,7 @@
         <input id="editSearch" type="text" placeholder="Suche: MV-Code, Bezeichnung, Art.nr. oder Lieferant …" style="flex:1;min-width:240px">
         <button class="btn" id="editSearchBtn" type="button">Suchen</button>
       </div>
-      <div id="editResults" style="margin-top:10px;display:flex;flex-direction:column;gap:5px;max-height:260px;overflow:auto"></div>
+      <div id="editResults" style="margin-top:10px;display:flex;flex-direction:column;gap:5px;max-height:55vh;overflow-y:auto"></div>
     </div>
 
     <div class="card hidden" id="editFormCard">
@@ -703,12 +703,12 @@ async function editSearch(){
   const like="%"+q+"%";
   const { data, error } = await db.from("artikel").select("*")
     .or(`mv_code.ilike.${like},bezeichnung.ilike.${like},art_nr_lieferant.ilike.${like},lieferant.ilike.${like}`)
-    .order("mv_nr",{ascending:true}).limit(25);
+    .order("mv_nr",{ascending:true}).limit(2000);
   if(error){ toast("Suchfehler: "+error.message, true); return; }
   if(!data||!data.length){ $("editResults").innerHTML='<div class="small muted">Keine Treffer.</div>'; return; }
   EDIT_HITS={};
   $("editResults").innerHTML = data.map(a=>{ EDIT_HITS[a.mv_code]=a;
-    return `<div class="frow"><b style="min-width:80px">${esc(a.mv_code)}</b><span class="fn">${esc(a.bezeichnung||"")} <span class="muted">· ${esc(a.lieferant||"")}${a.art_nr_lieferant?" · "+esc(a.art_nr_lieferant):""}</span></span><button class="btn" data-edit="${esc(a.mv_code)}" style="padding:4px 12px">bearbeiten</button></div>`;
+    return `<div class="frow"><b style="min-width:80px">${esc(a.mv_code)}</b><span class="fn">${esc(a.bezeichnung||"")} <span class="muted">· ${esc(a.lieferant||"")}${a.mass?" · "+esc(a.mass):""}${a.art_nr_lieferant?" · "+esc(a.art_nr_lieferant):""}</span></span><button class="btn" data-edit="${esc(a.mv_code)}" style="padding:4px 12px">bearbeiten</button></div>`;
   }).join("");
   $("editResults").querySelectorAll("button[data-edit]").forEach(b=>b.addEventListener("click",()=>loadEditForm(EDIT_HITS[b.dataset.edit])));
 }
