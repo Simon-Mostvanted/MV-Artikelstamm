@@ -120,11 +120,28 @@
 
   <!-- MODE SWITCH -->
   <div class="row" style="margin-bottom:16px;gap:8px">
-    <button class="btn" id="tabAnlegen" type="button">➕ Anlegen</button>
+    <button class="btn" id="tabEingang" type="button">📥 Eingang</button>
+    <button class="btn ghost" id="tabAnlegen" type="button">➕ Anlegen</button>
     <button class="btn ghost" id="tabBearbeiten" type="button">✏️ Bearbeiten</button>
   </div>
 
-  <div id="modeAnlegen">
+  <div id="modeEingang">
+    <div id="creditBanner" class="card hidden" style="border-color:var(--bad);background:rgba(239,68,68,.08)">
+      <b style="color:var(--bad)">⚠ Claude-Guthaben aufgebraucht</b>
+      <div class="small" id="creditBannerTxt" style="margin-top:4px">Neue Rechnungen werden aktuell nicht automatisch ausgelesen. Bitte Guthaben aufladen.</div>
+    </div>
+    <div class="card">
+      <h2><span class="step-no">📥</span> Eingang — automatisch ausgelesene Rechnungen</h2>
+      <div class="sub">Nur Positionen, die <b>gepflegt</b> werden müssen: neu, zu prüfen oder mit abweichendem EK. Vorhandene Artikel mit passendem Preis werden ausgeblendet.</div>
+      <div style="display:flex;gap:8px;align-items:center;margin:6px 0 12px">
+        <button class="btn" id="eingangReload" type="button">🔄 Aktualisieren</button>
+        <span id="eingangSummary" class="small muted"></span>
+      </div>
+      <div id="eingangList"></div>
+    </div>
+  </div>
+
+  <div id="modeAnlegen" class="hidden">
   <!-- STEP 1: CAPTURE -->
   <div class="card">
     <h2><span class="step-no">1</span> Artikel erfassen</h2>
@@ -175,6 +192,13 @@
   <div class="card hidden" id="matchCard">
     <h2><span class="step-no">2</span> Abgleich &amp; Ergänzen</h2>
     <div class="sub">Neue Artikel werden gegen den Supabase-Stamm geprüft (Lieferant + Art.nr.Lieferant, sowie Art.nr.Hersteller). Ergänze die fehlenden Felder – dann übernehmen.</div>
+    <div id="eingangBar" class="hidden" style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:12px;padding:8px 12px;border:1px solid var(--accent);border-radius:8px;background:rgba(99,102,241,.08)">
+      <span class="small">📥 Aus Eingang: <b id="eingangBarName"></b></span>
+      <span style="display:flex;gap:6px">
+        <button class="btn" id="eingangDoneBtn" type="button">✓ Erledigt &amp; zurück</button>
+        <button class="btn ghost" id="eingangBackBtn" type="button">← Eingang</button>
+      </span>
+    </div>
     <div class="summary" id="summary"></div>
     <div id="matchedBox" class="hidden" style="margin-bottom:16px;border:1px solid var(--line);border-radius:8px;padding:12px">
       <div style="font-weight:600;margin-bottom:8px">✅ Schon im Stamm — Preis prüfen</div>
@@ -287,6 +311,9 @@ let NEWROWS = [];      // nach Abgleich, editierbar
 let SKIPPED = [];      // {c, grund}
 let MATCHED = [];      // schon im Stamm (per Nummer): {c, mv_code, mv_nr, stEk, invEk, ekStatus}
 let REVIEW = [];       // mögliche Dubletten zum Prüfen: {c, hits:[{mv_code,mv_nr,lieferant,ek_exkl,bezeichnung}], kind:'artnr'|'name'}
+let EINGANG_ROWS = []; // geladene offene Eingangs-Rechnungen
+let EINGANG_CURRENT = null; // id der gerade aus dem Eingang geöffneten Rechnung
+let HIDE_OK_MATCHED = false; // im Eingang: vorhandene Artikel mit passendem EK ausblenden
 
 /* ---------- Stamm laden ---------- */
 // Bezeichnung schreibweisen-tolerant vergleichen: Groß/klein, Leerzeichen, Satzzeichen weg (Maße/Ziffern bleiben)
@@ -535,6 +562,7 @@ function refreshCapture(){
 /* Alles aus der Erfassung entfernen (Kandidaten + Formularfelder + Datei-Liste) */
 function clearCapture(){
   CANDIDATES=[]; NEWROWS=[]; SKIPPED=[]; MATCHED=[]; REVIEW=[];
+  EINGANG_CURRENT=null; HIDE_OK_MATCHED=false; const eb=$("eingangBar"); if(eb) eb.classList.add("hidden");
   MANUAL_FIELDS.forEach(id=>{ const el=$(id); if(el) el.value=""; });
   const fl=$("fileList"); if(fl) fl.innerHTML="";
   const pi=$("pdfInput"); if(pi) pi.value=""; const xi=$("xlsxInput"); if(xi) xi.value="";
@@ -613,9 +641,12 @@ function fmtEk(v){ return v==null ? "—" : (Number(v).toFixed(2).replace(".",",
 function renderMatched(){
   const box=$("matchedBox"), list=$("matchedList");
   if(!box) return;
-  if(!MATCHED.length){ box.classList.add("hidden"); list.innerHTML=""; return; }
+  // Im Eingang nur EK-Abweichungen zeigen; "passt bereits" ausblenden. Original-Index für den EK-Knopf behalten.
+  const entries = MATCHED.map((m,i)=>({m,i}))
+    .filter(e => !HIDE_OK_MATCHED || e.m.ekStatus==="diff" || e.m.ekStatus==="missing");
+  if(!entries.length){ box.classList.add("hidden"); list.innerHTML=""; return; }
   box.classList.remove("hidden");
-  list.innerHTML = MATCHED.map((m,i)=>{
+  list.innerHTML = entries.map(({m,i})=>{
     const kann = (m.ekStatus==="missing"||m.ekStatus==="diff");
     let ekLine;
     if(m.ekStatus==="noinv") ekLine="<span class='muted'>EK im Stamm: "+fmtEk(m.stEk)+" · keine Rechnungs-EK erkannt</span>";
@@ -846,15 +877,132 @@ $("exportBtn").addEventListener("click", ()=>{
   const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download="Neue_Artikel_MV.csv"; a.click();
 });
 
-/* ---------- Bearbeiten-Modus ---------- */
-function setMode(edit){
-  $("modeAnlegen").classList.toggle("hidden", edit);
-  $("modeBearbeiten").classList.toggle("hidden", !edit);
-  $("tabAnlegen").className = "btn"+(edit?" ghost":"");
-  $("tabBearbeiten").className = "btn"+(edit?"":" ghost");
+/* ---------- Ansichts-Umschaltung (Eingang / Anlegen / Bearbeiten) ---------- */
+function setMode(mode){
+  $("modeEingang").classList.toggle("hidden", mode!=="eingang");
+  $("modeAnlegen").classList.toggle("hidden", mode!=="anlegen");
+  $("modeBearbeiten").classList.toggle("hidden", mode!=="bearbeiten");
+  $("tabEingang").className    = "btn"+(mode==="eingang"?"":" ghost");
+  $("tabAnlegen").className     = "btn"+(mode==="anlegen"?"":" ghost");
+  $("tabBearbeiten").className  = "btn"+(mode==="bearbeiten"?"":" ghost");
+  const eb=$("eingangBar"); if(eb) eb.classList.toggle("hidden", !(mode==="anlegen" && EINGANG_CURRENT));
 }
-$("tabAnlegen").addEventListener("click", ()=>setMode(false));
-$("tabBearbeiten").addEventListener("click", ()=>setMode(true));
+$("tabEingang").addEventListener("click", ()=>{ setMode("eingang"); loadEingang(); });
+$("tabAnlegen").addEventListener("click", ()=>{ EINGANG_CURRENT=null; HIDE_OK_MATCHED=false; setMode("anlegen"); });
+$("tabBearbeiten").addEventListener("click", ()=>setMode("bearbeiten"));
+$("eingangReload").addEventListener("click", loadEingang);
+$("eingangDoneBtn").addEventListener("click", ()=>{ if(EINGANG_CURRENT!=null) markEingang(EINGANG_CURRENT,"erledigt"); });
+$("eingangBackBtn").addEventListener("click", ()=>{ setMode("eingang"); loadEingang(); });
+
+/* ---------- Eingang: automatisch ausgelesene Rechnungen ---------- */
+function eingangToCandidates(row){
+  const lief = clean(row.sender);
+  return (row.positionen||[]).map(a=>({
+    bezeichnung: clean(a.bezeichnung),
+    art_nr_lieferant: clean(a.artikelNummer),
+    art_nr_hersteller: clean(a.herstellerNummer),
+    hersteller: clean(a.hersteller),
+    lieferant: lief,
+    mass: clean(a.mass), farbe: clean(a.farbe),
+    vpe:"", ek_exkl: parseNum(a.preis),
+    quelle: row.datei_name||""
+  })).filter(c=>c.bezeichnung);
+}
+// Zählt je Rechnung die zu pflegenden Positionen (read-only, mutiert keine Globals)
+function classifyEingang(row){
+  let neu=0, pruefen=0, ekAbw=0;
+  const cands = eingangToCandidates(row);
+  for(const c of cands){
+    const na=norm(c.art_nr_lieferant), tl=normLief(c.lieferant), kh=norm(c.art_nr_hersteller);
+    if(na && STAMM.byArtNr.has(na)){
+      const hits=STAMM.byArtNr.get(na);
+      const same=hits.find(h=>normLief(h.lieferant)===tl);
+      if(same){ const m=makeMatched(c,same); if(m.ekStatus==="diff"||m.ekStatus==="missing") ekAbw++; continue; }
+      pruefen++; continue;
+    }
+    if(kh && kh!=="-" && STAMM.keyHerst.has(kh)) continue;
+    const nn=normName(c.bezeichnung);
+    if(nn && STAMM.byName.has(nn)){ pruefen++; continue; }
+    neu++;
+  }
+  return {neu, pruefen, ekAbw, total:cands.length, actionable:neu+pruefen+ekAbw};
+}
+function eingangCardHtml(row, cl){
+  const badges=[];
+  if(cl.neu)     badges.push("<span class='pill' style='background:rgba(74,222,128,.15);color:#4ade80'>"+cl.neu+" neu</span>");
+  if(cl.pruefen) badges.push("<span class='pill' style='background:rgba(245,158,11,.15);color:var(--warn)'>"+cl.pruefen+" prüfen</span>");
+  if(cl.ekAbw)   badges.push("<span class='pill' style='background:rgba(245,158,11,.15);color:var(--warn)'>"+cl.ekAbw+" EK-Abw.</span>");
+  const none = cl.actionable===0;
+  const badgeHtml = none ? "<span class='small muted'>nichts zu pflegen</span>" : badges.join(" ");
+  return "<div class='frow' style='align-items:center;gap:10px'>"+
+    "<div class='fn'><b>"+esc(row.sender||"?")+"</b>"+
+      "<div class='small muted'>"+esc(row.datei_name||"")+(row.rechnung_datum?" · "+esc(String(row.rechnung_datum)):"")+" · "+cl.total+" Pos.</div></div>"+
+    "<div style='display:flex;gap:6px;align-items:center;flex-wrap:wrap'>"+badgeHtml+"</div>"+
+    "<div style='display:flex;gap:6px'>"+
+      (none
+        ? "<button class='btn ghost' data-done='"+row.id+"' style='padding:4px 10px'>✓ Erledigt</button>"
+        : "<button class='btn' data-open='"+row.id+"' style='padding:4px 12px'>Öffnen →</button>")+
+      "<button class='btn ghost' data-ign='"+row.id+"' style='padding:4px 10px' title='Keine Artikel-Rechnung / nicht relevant'>Ignorieren</button>"+
+    "</div>"+
+  "</div>";
+}
+async function loadEingang(){
+  // Status-/Credits-Banner
+  try{
+    const { data:st } = await db.from("system_status").select("wert,info").eq("schluessel","auslese").maybeSingle();
+    const noCredit = st && st.wert==="kein_guthaben";
+    $("creditBanner").classList.toggle("hidden", !noCredit);
+    if(noCredit && st.info) $("creditBannerTxt").textContent = st.info;
+  }catch(e){ $("creditBanner").classList.add("hidden"); }
+
+  const list=$("eingangList"), sum=$("eingangSummary");
+  if(!STAMM.loaded){ list.innerHTML='<div class="small muted">Stamm wird geladen…</div>'; sum.textContent=""; return; }
+  list.innerHTML='<div class="small muted">lädt…</div>';
+  let rows;
+  try{
+    const { data, error } = await db.from("rechnung_eingang").select("*").eq("status","offen").order("created_at",{ascending:true});
+    if(error) throw error;
+    rows=data||[];
+  }catch(e){
+    list.innerHTML='<div class="small" style="color:var(--warn)">Eingang noch nicht eingerichtet oder nicht erreichbar. Bitte das Setup-SQL <code>rechnung-eingang-setup.sql</code> ausführen.</div>';
+    sum.textContent=""; return;
+  }
+  EINGANG_ROWS = rows;
+  let totalActionable=0, withWork=0;
+  const cards = rows.map(row=>{
+    const cl=classifyEingang(row);
+    if(cl.actionable>0) withWork++;
+    totalActionable+=cl.actionable;
+    return eingangCardHtml(row, cl);
+  });
+  sum.textContent = rows.length
+    ? (rows.length+" Rechnung(en) · "+totalActionable+" Position(en) zu pflegen"+((rows.length-withWork)>0?" · "+(rows.length-withWork)+" ohne offene Punkte":""))
+    : "";
+  list.innerHTML = rows.length ? cards.join("") : '<div class="small muted">Kein offener Eingang. 🎉</div>';
+  list.querySelectorAll("button[data-open]").forEach(b=>b.addEventListener("click",()=>openEingang(+b.dataset.open)));
+  list.querySelectorAll("button[data-done]").forEach(b=>b.addEventListener("click",()=>markEingang(+b.dataset.done,"erledigt")));
+  list.querySelectorAll("button[data-ign]").forEach(b=>b.addEventListener("click",()=>markEingang(+b.dataset.ign,"ignoriert")));
+}
+function openEingang(id){
+  const row = EINGANG_ROWS.find(r=>r.id===id); if(!row) return;
+  CANDIDATES = eingangToCandidates(row);
+  EINGANG_CURRENT = id;
+  HIDE_OK_MATCHED = true;
+  $("eingangBarName").textContent = (row.sender||"")+" · "+(row.datei_name||"");
+  setMode("anlegen");
+  refreshCapture();
+  runMatch();
+  window.scrollTo(0,0);
+}
+async function markEingang(id, status){
+  try{
+    const { error } = await db.from("rechnung_eingang").update({status, verarbeitet_am:new Date().toISOString()}).eq("id", id);
+    if(error) throw error;
+    if(EINGANG_CURRENT===id){ EINGANG_CURRENT=null; HIDE_OK_MATCHED=false; }
+    toast(status==="erledigt"?"Rechnung als erledigt markiert.":"Rechnung ignoriert.");
+    setMode("eingang"); loadEingang();
+  }catch(e){ toast("Konnte Status nicht setzen: "+(e.message||e), true); }
+}
 
 const EDIT_FIELDS = [
   ["bezeichnung","Bezeichnung","text","full"],
@@ -924,7 +1072,8 @@ $("editSaveBtn").addEventListener("click", async ()=>{
 });
 
 /* ---------- Init ---------- */
-loadStamm();
+setMode("eingang");
+loadStamm().then(loadEingang);
 </script>
 </body>
 </html>
