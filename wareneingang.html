@@ -187,6 +187,7 @@ function toast(m,bad){const t=document.createElement("div");t.className="toast"+
 function norm(v){return String(v==null?"":v).replace(/\s+/g," ").trim().toLowerCase()}
 function clean(v){let s=String(v==null?"":v).replace(/\s+/g," ").trim();return (s==="k.A."||s==="-")?"":s}
 function normLief(v){let s=norm(v).replace(/[.,&/]/g," ");s=s.replace(/\b(gmbh|mbh|co|kg|kgaa|ag|ohg|ug|se|gbr|ek|e\s+k|inh|inhaber|fa|firma)\b/g," ");return s.replace(/\s+/g," ").trim()}
+function normName(s){return String(s==null?"":s).toLowerCase().replace(/[^a-z0-9äöüß]+/g,"")}
 
 /* ---- Testmodus-Banner ---- */
 let TEST_TABLE_OK=false;
@@ -211,13 +212,28 @@ $("apiKey").addEventListener("input",()=>safeSet("anthropic_api_key",$("apiKey")
 $("toggleKey").addEventListener("click",()=>{const i=$("apiKey");i.type=i.type==="password"?"text":"password"});
 
 /* ---- Stamm laden (echt + Test) ---- */
-let STAMM={byArtNr:new Map(),byHerst:new Map(),loaded:false};
+let STAMM={byArtNr:new Map(),byHerst:new Map(),byName:new Map(),loaded:false};
 function indexRow(r,source){
   r._src=source; // 'echt' | 'test'
   const na=norm(r.art_nr_lieferant);
   if(na){ if(!STAMM.byArtNr.has(na)) STAMM.byArtNr.set(na,[]); STAMM.byArtNr.get(na).push(r); }
   const kh=norm(r.art_nr_hersteller);
   if(kh&&kh!=="-"){ if(!STAMM.byHerst.has(kh)) STAMM.byHerst.set(kh,[]); STAMM.byHerst.get(kh).push(r); }
+  const nn=normName(r.bezeichnung);
+  if(nn){ if(!STAMM.byName.has(nn)) STAMM.byName.set(nn,[]); STAMM.byName.get(nn).push(r); }
+}
+// Namens-Treffer im Stamm: exakt ODER "enthalten" (identisch zum Artikelmanager, nameHitsFor)
+const NAME_CONTAIN_MINLEN=12;
+function nameHitsFor(nn){
+  if(!nn) return [];
+  if(STAMM.byName.has(nn)) return STAMM.byName.get(nn);
+  const out=[],seen=new Set();
+  for(const [key,hits] of STAMM.byName){
+    if(Math.min(nn.length,key.length)>=NAME_CONTAIN_MINLEN && (nn.includes(key)||key.includes(nn))){
+      for(const h of hits){ if(!seen.has(h.mv_code)){ seen.add(h.mv_code); out.push(h); } }
+    }
+  }
+  return out;
 }
 async function pageAll(table){
   let all=[],from=0,page=1000;
@@ -230,7 +246,7 @@ async function pageAll(table){
   return all;
 }
 async function loadStamm(){
-  STAMM.byArtNr=new Map(); STAMM.byHerst=new Map(); STAMM.loaded=false;
+  STAMM.byArtNr=new Map(); STAMM.byHerst=new Map(); STAMM.byName=new Map(); STAMM.loaded=false;
   let echtN=0, testN=0;
   try{
     const echt=await pageAll("artikel");
@@ -420,6 +436,9 @@ function classify(it){
   if(okArt) return {status:"ok",art:okArt,note: okArt._src==="test"?"in der Test-Tabelle":""};
   if(eanArt) return {status:"ok",art:eanArt,note:"über Hersteller-/EAN-Nr. erkannt"};
   if(pruefArt) return {status:"pruef",art:pruefArt,note:pruefNote};
+  // Namens-Treffer (exakt ODER enthalten) -> prüfen statt neu (z. B. Lieferant ohne Art.nr. / Zusatztext)
+  const nameHits = nameHitsFor(normName(it.bezeichnung));
+  if(nameHits.length) return {status:"pruef",art:nameHits[0],note:"über Bezeichnung erkannt: "+nameHits.slice(0,3).map(h=>h.mv_code).join(", ")};
   return {status:"neu",art:null,note: cands.length?"":"keine Nummer erkannt"};
 }
 function match(data){

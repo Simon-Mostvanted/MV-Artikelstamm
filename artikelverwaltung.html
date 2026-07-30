@@ -232,9 +232,7 @@
   <!-- STEP 3: COMMIT -->
   <div class="card hidden" id="commitCard">
     <h2><span class="step-no">3</span> In Supabase übernehmen</h2>
-    <div class="sub">Beim Einfügen vergibt die Datenbank automatisch die nächste MV-Nummer (ab MV-12055). Bestehende Artikel werden nicht verändert.</div>
-    <div class="hint" id="policyHint">Voraussetzung: die INSERT-Berechtigung ist gesetzt. Falls das Übernehmen mit einem Rechte-Fehler abbricht, führe einmalig im Supabase SQL-Editor aus:
-      <code>create policy artikel_insert on public.artikel for insert with check (true);</code></div>
+    <div class="sub">Beim Einfügen vergibt die Datenbank automatisch die nächste MV-Nummer. Bestehende Artikel werden nicht verändert.</div>
     <div class="row" style="margin-top:12px">
       <button class="btn ok" id="commitBtn" type="button">✓ <span id="commitLabel">Neue Artikel übernehmen</span></button>
       <span id="commitInfo" class="small muted"></span>
@@ -603,6 +601,21 @@ function makeReview(c, hits, kind){
   for(const h of hits){ if(!seen.has(h.mv_code)){ seen.add(h.mv_code); uniq.push(Object.assign({}, h)); } }
   return { c, hits:uniq, kind };
 }
+/* Namens-Treffer im Stamm: exakt ODER "enthalten" (z. B. Rechnung hat Zusatztext wie
+   "…, hitzebeständig", oder Lieferant ohne Artikelnummer). Verhindert falsche "neu"-Einträge.
+   MINLEN schützt vor Treffern über zu kurze/generische Namen. */
+const NAME_CONTAIN_MINLEN = 12;
+function nameHitsFor(nn){
+  if(!nn) return [];
+  if(STAMM.byName.has(nn)) return STAMM.byName.get(nn);   // exakter Treffer
+  const out=[], seen=new Set();
+  for(const [key,hits] of STAMM.byName){
+    if(Math.min(nn.length, key.length) >= NAME_CONTAIN_MINLEN && (nn.includes(key) || key.includes(nn))){
+      for(const h of hits){ if(!seen.has(h.mv_code)){ seen.add(h.mv_code); out.push(h); } }
+    }
+  }
+  return out;
+}
 function runMatch(){
   if(!STAMM.loaded){ toast("Bitte zuerst den Stamm laden (oben).", true); return; }
   NEWROWS=[]; SKIPPED=[]; MATCHED=[]; REVIEW=[];
@@ -622,9 +635,10 @@ function runMatch(){
     }
     // 2) Art.nr.Hersteller bereits im Stamm?
     if(kh && kh!=="-" && STAMM.keyHerst.has(kh)){ SKIPPED.push({c,grund:"schon im Stamm (Art.nr.Hersteller)"}); continue; }
-    // 3) Namens-Dublette (gleiche Bezeichnung, evtl. andere Schreibweise) -> zum Prüfen
+    // 3) Namens-Treffer (exakt ODER enthalten, z. B. Rechnung mit Zusatztext) -> zum Prüfen
     const nn = normName(c.bezeichnung);
-    if(nn && STAMM.byName.has(nn)){ REVIEW.push(makeReview(c, STAMM.byName.get(nn), "name")); continue; }
+    const nameHits = nameHitsFor(nn);
+    if(nameHits.length){ REVIEW.push(makeReview(c, nameHits, "name")); continue; }
     // 4) Dublette innerhalb dieser Auswahl?
     const bkey = na ? (tl+"|"+na) : (tl+"##"+norm(c.bezeichnung));
     if(seenBatch.has(bkey)){ SKIPPED.push({c,grund:"Dublette in dieser Auswahl"}); continue; }
@@ -855,7 +869,7 @@ $("commitBtn").addEventListener("click", async ()=>{
   }catch(e){
     $("commitInfo").textContent="";
     const m=(e.message||String(e));
-    if(/policy|permission|row-level|rls/i.test(m)){ $("policyHint").style.borderColor="var(--bad)"; toast("Rechte-Fehler: bitte die INSERT-Policy setzen (siehe Hinweis).", true); }
+    if(/policy|permission|row-level|rls/i.test(m)){ toast("Rechte-Fehler beim Einfügen (INSERT-Policy). Bitte melden.", true); }
     else toast("Übernahme fehlgeschlagen: "+m, true);
     $("commitBtn").disabled=false;
   }
@@ -925,7 +939,7 @@ function classifyEingang(row){
     }
     if(kh && kh!=="-" && STAMM.keyHerst.has(kh)) continue;
     const nn=normName(c.bezeichnung);
-    if(nn && STAMM.byName.has(nn)){ pruefen++; continue; }
+    if(nameHitsFor(nn).length){ pruefen++; continue; }
     neu++;
   }
   return {neu, pruefen, ekAbw, total:cands.length, actionable:neu+pruefen+ekAbw};
