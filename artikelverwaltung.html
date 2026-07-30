@@ -760,6 +760,9 @@ async function reviewUpdateStamm(i,j,field){
 function updateCommitUI(){
   $("commitCard").classList.toggle("hidden", NEWROWS.length===0);
   $("commitLabel").textContent = NEWROWS.length+" neue Artikel übernehmen";
+  // Knopf bei jedem neuen Abgleich wieder aktivieren (war nach einem vorherigen Anlegen deaktiviert)
+  $("commitBtn").disabled = (NEWROWS.length===0);
+  $("commitInfo").textContent = "";
 }
 function removeNew(i){ NEWROWS.splice(i,1); renderSummary(); renderNewTable(); updateCommitUI(); }
 function renderSummary(){
@@ -989,6 +992,7 @@ function openEingang(id){
   EINGANG_CURRENT = id;
   HIDE_OK_MATCHED = true;
   $("eingangBarName").textContent = (row.sender||"")+" · "+(row.datei_name||"");
+  const rw=$("resultWrap"); if(rw) rw.classList.add("hidden");   // altes Ergebnis der vorigen Rechnung ausblenden
   setMode("anlegen");
   refreshCapture();
   runMatch();
