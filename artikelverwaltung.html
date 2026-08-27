@@ -323,7 +323,7 @@ async function loadStamm(){
     let all=[], from=0, page=1000;
     while(true){
       const { data, error } = await db.from("artikel")
-        .select("mv_nr,mv_code,art_nr_lieferant,art_nr_hersteller,lieferant,bezeichnung,ek_exkl")
+        .select("mv_nr,mv_code,art_nr_lieferant,art_nr_hersteller,lieferant,bezeichnung,ek_exkl,vpe_menge,einheit")
         .order("mv_nr",{ascending:true}).range(from, from+page-1);
       if(error) throw error;
       all = all.concat(data||[]);
@@ -336,12 +336,12 @@ async function loadStamm(){
       const na = norm(r.art_nr_lieferant);
       if(na){
         if(!STAMM.byArtNr.has(na)) STAMM.byArtNr.set(na, []);
-        STAMM.byArtNr.get(na).push({ mv_code:r.mv_code, mv_nr:r.mv_nr, lieferant:r.lieferant, ek_exkl:r.ek_exkl, bezeichnung:r.bezeichnung, art_nr_lieferant:r.art_nr_lieferant });
+        STAMM.byArtNr.get(na).push({ mv_code:r.mv_code, mv_nr:r.mv_nr, lieferant:r.lieferant, ek_exkl:r.ek_exkl, bezeichnung:r.bezeichnung, art_nr_lieferant:r.art_nr_lieferant, vpe_menge:r.vpe_menge, einheit:r.einheit });
       }
       const kh = norm(r.art_nr_hersteller);
       if(kh && kh!=="-") STAMM.keyHerst.add(kh);
       const nn = normName(r.bezeichnung);
-      if(nn){ if(!STAMM.byName.has(nn)) STAMM.byName.set(nn, []); STAMM.byName.get(nn).push({ mv_code:r.mv_code, mv_nr:r.mv_nr, lieferant:r.lieferant, ek_exkl:r.ek_exkl, bezeichnung:r.bezeichnung, art_nr_lieferant:r.art_nr_lieferant }); }
+      if(nn){ if(!STAMM.byName.has(nn)) STAMM.byName.set(nn, []); STAMM.byName.get(nn).push({ mv_code:r.mv_code, mv_nr:r.mv_nr, lieferant:r.lieferant, ek_exkl:r.ek_exkl, bezeichnung:r.bezeichnung, art_nr_lieferant:r.art_nr_lieferant, vpe_menge:r.vpe_menge, einheit:r.einheit }); }
       if(r.mv_nr>STAMM.maxMv) STAMM.maxMv=r.mv_nr;
     }
     STAMM.loaded=true;
@@ -573,13 +573,22 @@ function clearCapture(){
 
 /* ---------- Abgleich ---------- */
 function makeMatched(c, hit){
-  const invEk = (c.ek_exkl!=null && c.ek_exkl!=="") ? Number(c.ek_exkl) : null;
-  const stEk  = (hit.ek_exkl!=null) ? Number(hit.ek_exkl) : null;
+  const invRaw = (c.ek_exkl!=null && c.ek_exkl!=="") ? Number(c.ek_exkl) : null; // Rechnungspreis wie extrahiert
+  const stEk   = (hit.ek_exkl!=null) ? Number(hit.ek_exkl) : null;               // Stamm-EK pro Einheit
+  const vpe    = (hit.vpe_menge!=null && Number(hit.vpe_menge)>0) ? Number(hit.vpe_menge) : 1;
+  const einheit= hit.einheit||"";
+  const perVPE = invRaw!=null ? invRaw/vpe : null;   // falls Rechnung pro VPE
+  const perUnit= invRaw;                             // falls Rechnung pro Einheit
+  // Basis raten: welcher Kandidat liegt näher am aktuellen Stamm-EK?
+  let basis = "einheit";
+  if(vpe>1 && invRaw!=null && stEk!=null) basis = (Math.abs(perVPE-stEk) <= Math.abs(perUnit-stEk)) ? "vpe" : "einheit";
+  else if(vpe>1) basis = "vpe";
+  const chosen = (basis==="vpe") ? perVPE : perUnit;
   let ekStatus="same";
-  if(invEk==null) ekStatus="noinv";                       // keine Rechnungs-EK erkannt
-  else if(stEk==null) ekStatus="missing";                 // Stamm hat noch keinen Preis
-  else if(Math.abs(stEk-invEk)>0.001) ekStatus="diff";    // Preis weicht ab
-  return { c, mv_code:hit.mv_code, mv_nr:hit.mv_nr, stEk, invEk, ekStatus };
+  if(invRaw==null) ekStatus="noinv";
+  else if(stEk==null) ekStatus="missing";
+  else if(Math.abs(stEk-chosen)>0.005) ekStatus="diff";
+  return { c, mv_code:hit.mv_code, mv_nr:hit.mv_nr, stEk, invRaw, vpe, einheit, perVPE, perUnit, basis, ekStatus };
 }
 /* Neuen (editierbaren) Artikel aus Kandidat bauen. Bestellweg wird NIE automatisch gefüllt;
    nur etikett_typ='kein' bleibt bei Würth automatisch (Würth etikettiert selbst). */
@@ -651,7 +660,9 @@ function runMatch(){
   updateCommitUI();
   $("matchCard").scrollIntoView({behavior:"smooth"});
 }
-function fmtEk(v){ return v==null ? "—" : (Number(v).toFixed(2).replace(".",",")+" €"); }
+function fmtEk(v){ if(v==null) return "—"; v=Number(v); const a=Math.abs(v);
+  let d=2; if(a>0&&a<0.001) d=6; else if(a>0&&a<0.1) d=4;
+  return v.toFixed(d).replace(".",",")+" €"; }
 function renderMatched(){
   const box=$("matchedBox"), list=$("matchedList");
   if(!box) return;
@@ -661,32 +672,49 @@ function renderMatched(){
   if(!entries.length){ box.classList.add("hidden"); list.innerHTML=""; return; }
   box.classList.remove("hidden");
   list.innerHTML = entries.map(({m,i})=>{
-    const kann = (m.ekStatus==="missing"||m.ekStatus==="diff");
-    let ekLine;
-    if(m.ekStatus==="noinv") ekLine="<span class='muted'>EK im Stamm: "+fmtEk(m.stEk)+" · keine Rechnungs-EK erkannt</span>";
-    else if(m.ekStatus==="same") ekLine="<span class='muted'>EK: "+fmtEk(m.stEk)+" (aktuell) ✓</span>";
-    else if(m.ekStatus==="missing") ekLine="<span style='color:var(--warn)'>Stamm hat keinen EK · Rechnung: <b>"+fmtEk(m.invEk)+"</b></span>";
-    else ekLine="<span style='color:var(--warn)'>Stamm-EK: "+fmtEk(m.stEk)+" · Rechnung: <b>"+fmtEk(m.invEk)+"</b> (abweichend)</span>";
-    return "<div class='frow' style='align-items:center'>"+
+    let ekLine, buttons="<span class='small muted'>—</span>";
+    if(m.ekStatus==="noinv"){
+      ekLine="<span class='muted'>EK im Stamm: "+fmtEk(m.stEk)+" · keine Rechnungs-EK erkannt</span>";
+    } else if(m.ekStatus==="same"){
+      ekLine="<span class='muted'>EK: "+fmtEk(m.stEk)+" (aktuell) ✓</span>";
+    } else {
+      const st = (m.ekStatus==="missing") ? "Stamm hat keinen EK" : ("Stamm-EK: "+fmtEk(m.stEk));
+      const eh = esc(m.einheit||"Einheit");
+      if(m.vpe>1){
+        ekLine="<span style='color:var(--warn)'>"+st+" · Rechnung <b>"+fmtEk(m.invRaw)+"</b> · VPE-Größe "+m.vpe+" → pro "+eh+" <b>"+fmtEk(m.perVPE)+"</b></span>";
+        const bV="<button class='"+(m.basis==="vpe"?"btn":"btn ghost")+"' data-ek='"+i+"' data-basis='vpe' style='padding:4px 10px'>"+fmtEk(m.perVPE)+" (Rechnung pro VPE)</button>";
+        const bE="<button class='"+(m.basis==="einheit"?"btn":"btn ghost")+"' data-ek='"+i+"' data-basis='einheit' style='padding:4px 10px'>"+fmtEk(m.perUnit)+" (pro "+eh+")</button>";
+        buttons=bV+" "+bE;
+      } else {
+        ekLine="<span style='color:var(--warn)'>"+st+" · Rechnung: <b>"+fmtEk(m.invRaw)+"</b></span>";
+        buttons="<button class='btn' data-ek='"+i+"' data-basis='einheit' style='padding:4px 12px'>EK aktualisieren</button>";
+      }
+    }
+    return "<div class='frow' style='align-items:center;flex-wrap:wrap;gap:6px'>"+
       "<b style='min-width:80px'>"+esc(m.mv_code)+"</b>"+
       "<span class='fn'>"+esc(m.c.bezeichnung||"")+"<br><span class='small'>"+ekLine+"</span></span>"+
-      (kann ? "<button class='btn' data-ek='"+i+"' style='padding:4px 12px'>EK aktualisieren</button>" : "<span class='small muted'>—</span>")+
+      buttons+
       "</div>";
   }).join("");
-  list.querySelectorAll("button[data-ek]").forEach(b=>b.addEventListener("click",()=>updateEk(+b.dataset.ek)));
+  list.querySelectorAll("button[data-ek]").forEach(b=>b.addEventListener("click",()=>updateEk(+b.dataset.ek, b.dataset.basis)));
 }
-async function updateEk(i){
-  const m=MATCHED[i]; if(!m || m.invEk==null) return;
-  const b=$("matchedList").querySelector("button[data-ek='"+i+"']"); if(b){ b.disabled=true; b.textContent="…"; }
+async function updateEk(i, basis){
+  const m=MATCHED[i]; if(!m || m.invRaw==null) return;
+  basis = basis || m.basis || "einheit";
+  let val = (basis==="vpe") ? m.perVPE : m.perUnit;
+  if(val==null) return;
+  val = Math.round(val*1e6)/1e6;   // Float-Rauschen vermeiden, bis 6 Nachkommastellen
+  $("matchedList").querySelectorAll("button[data-ek='"+i+"']").forEach(b=>{ b.disabled=true; });
   try{
-    const { error } = await db.from("artikel").update({ek_exkl:m.invEk}).eq("mv_nr", m.mv_nr);
+    const { error } = await db.from("artikel").update({ek_exkl:val}).eq("mv_nr", m.mv_nr);
     if(error) throw error;
-    m.stEk=m.invEk; m.ekStatus="same";
-    // In-Memory-Stamm mitziehen
-    for(const arr of STAMM.byArtNr.values()){ const e=arr.find(x=>x.mv_nr===m.mv_nr); if(e) e.ek_exkl=m.invEk; }
+    m.stEk=val; m.ekStatus="same";
+    // In-Memory-Stamm mitziehen (beide Indizes)
+    for(const arr of STAMM.byArtNr.values()){ const e=arr.find(x=>x.mv_nr===m.mv_nr); if(e) e.ek_exkl=val; }
+    for(const arr of STAMM.byName.values()){ const e=arr.find(x=>x.mv_nr===m.mv_nr); if(e) e.ek_exkl=val; }
     renderMatched();
-    toast("EK aktualisiert: "+m.mv_code+" → "+fmtEk(m.invEk));
-  }catch(e){ if(b){ b.disabled=false; b.textContent="EK aktualisieren"; } toast("EK-Update fehlgeschlagen: "+(e.message||e), true); }
+    toast("EK aktualisiert: "+m.mv_code+" → "+fmtEk(val)+" pro "+(m.einheit||"Einheit"));
+  }catch(e){ renderMatched(); toast("EK-Update fehlgeschlagen: "+(e.message||e), true); }
 }
 /* ----- Mögliche Dubletten prüfen (Preisabgleich + Namen-Angleich pro Fall) ----- */
 function renderReview(){
