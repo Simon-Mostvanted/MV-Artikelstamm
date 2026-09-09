@@ -123,6 +123,7 @@
     <button class="btn" id="tabEingang" type="button">📥 Eingang</button>
     <button class="btn ghost" id="tabAnlegen" type="button">➕ Anlegen</button>
     <button class="btn ghost" id="tabBearbeiten" type="button">✏️ Bearbeiten</button>
+    <button class="btn ghost" id="tabBaugruppen" type="button">🧩 Baugruppen</button>
   </div>
 
   <div id="modeEingang">
@@ -267,6 +268,20 @@
         <span id="editSaveInfo" class="small muted"></span>
       </div>
     </div>
+  </div>
+
+  <div id="modeBaugruppen" class="hidden">
+    <div class="card" id="bgListCard">
+      <h2><span class="step-no">🧩</span> Baugruppen &amp; Kalkulation</h2>
+      <div class="sub">Eigene Produkte aus Stamm-Artikeln zusammensetzen und kalkulieren. Endprodukte laufen bis zum Listenpreis, interne Baugruppen nur bis zu den Selbstkosten.</div>
+      <div class="row" style="margin:10px 0;gap:8px;align-items:center">
+        <button class="btn" id="bgReload" type="button">🔄 Aktualisieren</button>
+        <button class="btn ok" id="bgNew" type="button">＋ Neue Baugruppe</button>
+        <span id="bgSummary" class="small muted"></span>
+      </div>
+      <div id="bgList"></div>
+    </div>
+    <div id="bgEditor"></div>
   </div>
 </main>
 
@@ -927,14 +942,19 @@ function setMode(mode){
   $("modeEingang").classList.toggle("hidden", mode!=="eingang");
   $("modeAnlegen").classList.toggle("hidden", mode!=="anlegen");
   $("modeBearbeiten").classList.toggle("hidden", mode!=="bearbeiten");
+  $("modeBaugruppen").classList.toggle("hidden", mode!=="baugruppen");
   $("tabEingang").className    = "btn"+(mode==="eingang"?"":" ghost");
   $("tabAnlegen").className     = "btn"+(mode==="anlegen"?"":" ghost");
   $("tabBearbeiten").className  = "btn"+(mode==="bearbeiten"?"":" ghost");
+  $("tabBaugruppen").className  = "btn"+(mode==="baugruppen"?"":" ghost");
   const eb=$("eingangBar"); if(eb) eb.classList.toggle("hidden", !(mode==="anlegen" && EINGANG_CURRENT));
 }
 $("tabEingang").addEventListener("click", ()=>{ setMode("eingang"); loadEingang(); });
 $("tabAnlegen").addEventListener("click", ()=>{ EINGANG_CURRENT=null; HIDE_OK_MATCHED=false; setMode("anlegen"); });
 $("tabBearbeiten").addEventListener("click", ()=>setMode("bearbeiten"));
+$("tabBaugruppen").addEventListener("click", ()=>{ setMode("baugruppen"); loadBaugruppen(); });
+$("bgReload").addEventListener("click", loadBaugruppen);
+$("bgNew").addEventListener("click", ()=>newBaugruppe());
 $("eingangReload").addEventListener("click", loadEingang);
 $("eingangDoneBtn").addEventListener("click", ()=>{ if(EINGANG_CURRENT!=null) markEingang(EINGANG_CURRENT,"erledigt"); });
 $("eingangBackBtn").addEventListener("click", ()=>{ setMode("eingang"); loadEingang(); });
@@ -1116,6 +1136,290 @@ $("editSaveBtn").addEventListener("click", async ()=>{
   }
   $("editSaveBtn").disabled=false;
 });
+
+/* ================= Baugruppen & Kalkulation ================= */
+let KALK=null, ARTBYMV=new Map(), BOMBYBG=new Map();
+
+async function loadKalkData(){
+  try{ const {data}=await db.from("kalk_vorgaben").select("*").eq("id",1).maybeSingle(); KALK=data||{}; }catch(e){ KALK={}; }
+  ARTBYMV=new Map(); let from=0, page=1000;
+  while(true){
+    const {data,error}=await db.from("artikel")
+      .select("mv_nr,mv_code,bezeichnung,art_nr_lieferant,lieferant,ek_exkl,einheit,vpe_menge,typ,verkaeuflich,bezugsart,vk_inkl,vk_manuell,kalk_param")
+      .order("mv_nr",{ascending:true}).range(from,from+page-1);
+    if(error) throw error;
+    (data||[]).forEach(a=>ARTBYMV.set(a.mv_nr,a));
+    if(!data||data.length<page) break; from+=page;
+  }
+  BOMBYBG=new Map(); from=0;
+  while(true){
+    const {data,error}=await db.from("stueckliste").select("*")
+      .order("baugruppe_mv_nr",{ascending:true}).order("position",{ascending:true}).range(from,from+page-1);
+    if(error) throw error;
+    (data||[]).forEach(l=>{ if(!BOMBYBG.has(l.baugruppe_mv_nr)) BOMBYBG.set(l.baugruppe_mv_nr,[]); BOMBYBG.get(l.baugruppe_mv_nr).push(l); });
+    if(!data||data.length<page) break; from+=page;
+  }
+}
+/* Zuschlagssätze: globale Vorgabe + optionale Produkt-Overrides (kalk_param) */
+function bgRates(a){
+  const base=Object.assign({materialgemeinkosten:0,fertigungsgemeinkosten:0,verwaltungsgemeinkosten:0,vertriebsgemeinkosten:0,gewinn:0,skonto:0,rabatt:0,ust:19}, KALK||{});
+  const ov=a&&a.kalk_param;
+  if(ov&&typeof ov==="object"){ for(const k in ov){ const v=ov[k]; if(v!=null&&v!=="") base[k]=Number(v); } }
+  return base;
+}
+/* Kosten pro Einheit einer Komponente: Baugruppe -> Selbstkosten (rekursiv), sonst EK */
+function bgComponentCost(mv, visited){
+  const a=ARTBYMV.get(mv); if(!a) return 0;
+  const isProduct=(BOMBYBG.get(mv)||[]).length>0 || a.bezugsart==="eigen" || a.bezugsart==="fremd" || a.typ==="eigenprodukt";
+  if(isProduct) return calcProduct(mv, visited).selbstkosten;
+  return Number(a.ek_exkl)||0;
+}
+/* Volle Zuschlagskalkulation für ein Produkt (mit Endlosschleifen-Schutz) */
+function calcProduct(mv, visited){
+  visited = visited || new Set();
+  const zeros={circular:false,matSum:0,fertSum:0,material:0,fertigung:0,herstell:0,selbstkosten:0,gewinn:0,barVK:0,zielVK:0,listenNet:0,listenBrutto:0};
+  if(visited.has(mv)){ return Object.assign({},zeros,{circular:true}); }
+  visited=new Set(visited); visited.add(mv);
+  const a=ARTBYMV.get(mv)||{};
+  const lines=BOMBYBG.get(mv)||[];
+  let matSum=0, fertSum=0, circular=false;
+  if(a.bezugsart!=="fremd" && lines.length>0){
+    for(const l of lines){
+      const sub=bgComponentCost(l.komponente_mv_nr, visited);
+      const c=(Number(sub)||0)*(Number(l.menge)||0);
+      if(l.art==="fertigung") fertSum+=c; else matSum+=c;
+    }
+  } else {
+    matSum=Number(a.ek_exkl)||0;   // fremd/zukauf: EK (Fertigerpreis) ist die Kostenbasis
+  }
+  const r=bgRates(a);
+  const material=matSum*(1+r.materialgemeinkosten/100);
+  const fertigung=fertSum*(1+r.fertigungsgemeinkosten/100);
+  const herstell=material+fertigung;
+  const selbstkosten=herstell*(1+(r.verwaltungsgemeinkosten+r.vertriebsgemeinkosten)/100);
+  const gewinn=selbstkosten*r.gewinn/100;
+  const barVK=selbstkosten+gewinn;
+  const skonto=barVK*r.skonto/100;
+  const zielVK=barVK+skonto;
+  const rabatt=zielVK*r.rabatt/100;
+  const listenNet=zielVK+rabatt;
+  const listenBrutto=listenNet*(1+r.ust/100);
+  return {circular,matSum,fertSum,material,fertigung,herstell,selbstkosten,gewinn,barVK,zielVK,listenNet,listenBrutto,rates:r};
+}
+
+async function loadBaugruppen(){
+  BG_CUR=null; $("bgEditor").innerHTML=""; { const lc=$("bgListCard"); if(lc) lc.classList.remove("hidden"); }
+  const list=$("bgList"), sum=$("bgSummary");
+  list.innerHTML='<div class="small muted">lädt…</div>'; sum.textContent="";
+  try{ await loadKalkData(); }
+  catch(e){ list.innerHTML='<div class="small" style="color:var(--bad)">Kalkulationsdaten konnten nicht geladen werden: '+esc(e.message||String(e))+'</div>'; return; }
+  const bgs=[];
+  ARTBYMV.forEach(a=>{ const hasBom=(BOMBYBG.get(a.mv_nr)||[]).length>0; if(hasBom||a.typ==="eigenprodukt"||a.verkaeuflich) bgs.push(a); });
+  bgs.sort((x,y)=>x.mv_nr-y.mv_nr);
+  sum.textContent=bgs.length+" Baugruppe(n)/Produkt(e)";
+  if(!bgs.length){ list.innerHTML='<div class="small muted">Noch keine Baugruppen. Lege mit „＋ Neue Baugruppe" die erste an.</div>'; return; }
+  list.innerHTML=bgs.map(a=>{
+    const c=calcProduct(a.mv_nr);
+    const end=a.verkaeuflich;
+    const wert=end ? ("VK "+fmtEk(c.listenBrutto)+" brutto") : ("Selbstkosten "+fmtEk(c.selbstkosten));
+    const npos=(BOMBYBG.get(a.mv_nr)||[]).length;
+    return "<div class='frow' style='align-items:center;gap:10px'>"+
+      "<b style='min-width:80px'>"+esc(a.mv_code)+"</b>"+
+      "<span class='fn'>"+esc(a.bezeichnung||"")+"<br><span class='small muted'>"+npos+" Position(en) · "+(end?"Endprodukt":"interne Baugruppe")+" · "+wert+(c.circular?" · <span style=\"color:var(--bad)\">⚠ Schleife</span>":"")+"</span></span>"+
+      "<button class='btn' data-bgopen='"+a.mv_nr+"' style='padding:4px 12px'>Öffnen →</button>"+
+    "</div>";
+  }).join("");
+  list.querySelectorAll("button[data-bgopen]").forEach(b=>b.addEventListener("click",()=>openBaugruppe(+b.dataset.bgopen)));
+}
+let BG_CUR=null;
+const NUMST="width:78px;background:var(--chip);border:1px solid var(--line);color:var(--text);border-radius:7px;padding:6px 8px;font-size:13px;text-align:right;font-family:inherit";
+
+async function newBaugruppe(){
+  const name=prompt("Name der neuen Baugruppe / des Produkts:");
+  if(!name||!name.trim()) return;
+  try{
+    const { data, error } = await db.from("artikel")
+      .insert({ bezeichnung:name.trim(), typ:"eigenprodukt", verkaeuflich:true, bezugsart:"eigen", einheit:"Stück", vpe_menge:1 })
+      .select("mv_nr,mv_code").single();
+    if(error) throw error;
+    await loadKalkData();
+    toast("Baugruppe angelegt: "+data.mv_code);
+    openBaugruppe(data.mv_nr);
+  }catch(e){ toast("Anlegen fehlgeschlagen: "+(e.message||e), true); }
+}
+function openBaugruppe(mv){ BG_CUR=mv; const lc=$("bgListCard"); if(lc) lc.classList.add("hidden"); renderEditor(); window.scrollTo(0,0); }
+function bgBack(){ BG_CUR=null; $("bgEditor").innerHTML=""; const lc=$("bgListCard"); if(lc) lc.classList.remove("hidden"); loadBaugruppen(); }
+
+/* verhindert Zyklen: enthält 'from' (über Unterbaugruppen) das 'target'? */
+function bgReaches(from,target,visited){
+  if(from===target) return true;
+  visited=visited||new Set(); if(visited.has(from)) return false; visited.add(from);
+  return (BOMBYBG.get(from)||[]).some(l=>bgReaches(l.komponente_mv_nr,target,visited));
+}
+
+function renderEditor(){
+  const a=ARTBYMV.get(BG_CUR); if(!a){ $("bgEditor").innerHTML=""; return; }
+  const fremd=(a.bezugsart==="fremd");
+  const lines=BOMBYBG.get(BG_CUR)||[];
+  const c=calcProduct(BG_CUR);
+  let h="";
+  // Kopf
+  h+="<div class='card'>";
+  h+="<div class='row' style='justify-content:space-between;align-items:center'>";
+  h+="<h2 style='margin:0'>"+esc(a.bezeichnung||"(ohne Name)")+" <span class='small muted mono'>"+esc(a.mv_code||"")+"</span></h2>";
+  h+="<button class='btn ghost' id='bgBackBtn' type='button'>← Liste</button></div>";
+  h+="<div class='row' style='gap:18px;margin-top:12px;flex-wrap:wrap;align-items:center'>";
+  h+="<label style='display:flex;gap:7px;align-items:center'><input type='checkbox' id='bgVerk' style='width:auto' "+(a.verkaeuflich?"checked":"")+"> Endprodukt (bis Listenpreis)</label>";
+  h+="<span>Herstellung: <button class='btn"+(!fremd?"":" ghost")+"' id='bgBezEigen' type='button' style='padding:3px 10px'>selbst</button> <button class='btn"+(fremd?"":" ghost")+"' id='bgBezFremd' type='button' style='padding:3px 10px'>fertigen lassen</button></span>";
+  h+="</div></div>";
+  // Stückliste ODER Fremdpreis
+  h+="<div class='card'>";
+  if(fremd){
+    h+="<h2>Fremdfertigung</h2><div class='sub'>Preis vom Fertiger (netto, pro Einheit) — die Zuschläge laufen darauf.</div>";
+    h+="<div class='row' style='margin-top:10px;align-items:center'><label style='min-width:200px'>Fremdfertigungspreis netto</label><input id='bgFremdEk' type='number' step='0.01' value='"+(a.ek_exkl!=null?a.ek_exkl:"")+"' style='"+NUMST+";width:120px'> €</div>";
+  } else {
+    h+="<h2>Stückliste</h2>";
+    h+="<div class='tablewrap'><table><thead><tr><th>Komponente</th><th>Art</th><th class='num'>Menge</th><th class='num'>Kosten/Einh.</th><th class='num'>Summe</th><th></th></tr></thead><tbody>";
+    lines.forEach(l=>{
+      const k=ARTBYMV.get(l.komponente_mv_nr)||{};
+      const unit=bgComponentCost(l.komponente_mv_nr,new Set([BG_CUR]));
+      const nm=l.bezeichnung||k.bezeichnung||("MV-"+l.komponente_mv_nr);
+      h+="<tr>"+
+        "<td><div class='art-name'>"+esc(nm)+"</div><div class='art-code mono'>"+esc(k.mv_code||"")+"</div></td>"+
+        "<td><select data-ll='"+l.id+"' data-lf='art' style='width:110px'><option value='material'"+(l.art==='material'?' selected':'')+">Material</option><option value='fertigung'"+(l.art==='fertigung'?' selected':'')+">Fertigung</option></select></td>"+
+        "<td class='num'><input data-ll='"+l.id+"' data-lf='menge' type='number' step='0.5' value='"+l.menge+"' style='"+NUMST+"'></td>"+
+        "<td class='num mono'>"+fmtEk(unit)+"</td>"+
+        "<td class='num mono'>"+fmtEk(unit*(Number(l.menge)||0))+"</td>"+
+        "<td><button class='btn ghost' data-lrm='"+l.id+"' style='padding:3px 8px'>✕</button></td></tr>";
+    });
+    h+="</tbody></table></div>";
+    if(!lines.length) h+="<div class='small muted' style='margin-top:8px'>Noch keine Positionen — unten suchen und hinzufügen.</div>";
+    h+="<div style='margin-top:12px'><input id='bgAddSearch' type='text' placeholder='Artikel oder Baugruppe suchen (Name / MV / Art.nr.) …'>";
+    h+="<div id='bgAddRes' style='margin-top:6px;display:flex;flex-direction:column;gap:4px;max-height:220px;overflow:auto'></div></div>";
+  }
+  h+="</div>";
+  // Kalkulation
+  h+="<div class='card'>"+renderBgCalc(a,c)+"</div>";
+  $("bgEditor").innerHTML=h;
+  // Handler
+  $("bgBackBtn").addEventListener("click",bgBack);
+  $("bgVerk").addEventListener("change",e=>bgSetFlag("verkaeuflich",e.target.checked));
+  $("bgBezEigen").addEventListener("click",()=>bgSetFlag("bezugsart","eigen"));
+  $("bgBezFremd").addEventListener("click",()=>bgSetFlag("bezugsart","fremd"));
+  if(fremd){ const f=$("bgFremdEk"); if(f) f.addEventListener("change",()=>bgSetFlag("ek_exkl",parseNum(f.value))); }
+  else {
+    $("bgEditor").querySelectorAll("select[data-ll],input[data-ll]").forEach(el=>el.addEventListener("change",()=>bgUpdateLine(+el.dataset.ll,el.dataset.lf,el.value)));
+    $("bgEditor").querySelectorAll("button[data-lrm]").forEach(b=>b.addEventListener("click",()=>bgRemoveLine(+b.dataset.lrm)));
+    const s=$("bgAddSearch"); if(s) s.addEventListener("input",()=>bgDoSearch(s.value));
+  }
+  wireBgCalc(a,c);
+}
+function renderBgCalc(a,c){
+  const end=a.verkaeuflich;
+  const line=(lab,val,strong)=>"<div style='display:flex;justify-content:space-between;gap:8px;padding:5px 0;"+(strong?"border-top:1px solid var(--line);margin-top:4px;font-weight:600":"")+"'><span class='small'>"+lab+"</span><span class='mono'>"+fmtEk(val)+"</span></div>";
+  let h="<h2>Kalkulation</h2>";
+  h+=line("Material",c.material);
+  h+=line("Fertigung",c.fertigung);
+  h+=line("Herstellkosten",c.herstell,true);
+  h+=line("Kalk. Selbstkosten",c.selbstkosten,true);
+  if(c.circular) h+="<div class='small' style='color:var(--bad)'>⚠ Zirkuläre Baugruppe – Kosten evtl. unvollständig.</div>";
+  if(!end){ h+="<div class='small muted' style='margin-top:8px'>Interne Baugruppe – stoppt bei den Selbstkosten (fließt als Kostenbasis in übergeordnete Produkte).</div>"; return h; }
+  h+=line("+ Gewinn ("+c.rates.gewinn+" %)",c.gewinn);
+  h+=line("+ Skonto + Rabatt",(c.listenNet-c.barVK));
+  const manual=a.vk_manuell&&a.vk_inkl!=null;
+  const finalBrutto=manual?Number(a.vk_inkl):c.listenBrutto;
+  const finalNet=finalBrutto/(1+c.rates.ust/100);
+  h+="<div style='margin-top:12px;padding:12px;background:var(--chip);border:1px solid var(--line);border-radius:10px'>";
+  h+="<div class='small muted'>Listenverkaufspreis brutto</div>";
+  h+="<div style='font-size:26px;font-weight:800'>"+fmtEk(finalBrutto)+"</div>";
+  h+="<div class='small muted'>netto: "+fmtEk(finalNet)+(manual?" · manuell gesetzt":"")+"</div></div>";
+  h+="<div class='row' style='margin-top:10px;gap:8px;align-items:center;flex-wrap:wrap'>";
+  h+="<label style='display:flex;gap:6px;align-items:center'><input type='checkbox' id='bgRndOn' style='width:auto' "+(manual?"checked":"")+"> Endpreis manuell (brutto)</label>";
+  h+="<input id='bgRndVal' type='number' step='1' value='"+(manual?Number(a.vk_inkl):Math.round(c.listenBrutto))+"' style='"+NUMST+";"+(manual?"":"display:none")+"'>";
+  h+="<button class='btn ok' id='bgSavePrice' type='button' style='padding:5px 12px'>Verkaufspreis speichern</button></div>";
+  h+="<div style='margin-top:14px;border-top:1px solid var(--line);padding-top:12px'><b>B2B-Rabatt prüfen</b>";
+  h+="<div class='row' style='gap:8px;align-items:center;margin-top:8px'><label style='min-width:150px'>Rabatt auf Liste</label><input id='bgB2B' type='number' value='20' style='"+NUMST+";width:70px'> %</div>";
+  h+="<div id='bgB2BOut' class='small' style='margin-top:8px'></div></div>";
+  return h;
+}
+function wireBgCalc(a,c){
+  if(!a.verkaeuflich) return;
+  const rndOn=$("bgRndOn"), rndVal=$("bgRndVal"), b2b=$("bgB2B");
+  function b2bCalc(){
+    if(!b2b) return;
+    const manual=rndOn&&rndOn.checked&&rndVal.value;
+    const finalBrutto=manual?(parseNum(rndVal.value)||0):c.listenBrutto;
+    const finalNet=finalBrutto/(1+c.rates.ust/100);
+    const r=parseNum(b2b.value)||0;
+    const b2bNet=finalNet*(1-r/100), rest=b2bNet-c.selbstkosten, restPct=c.selbstkosten>0?rest/c.selbstkosten*100:0;
+    $("bgB2BOut").innerHTML="B2B-Preis netto <b class='mono'>"+fmtEk(b2bNet)+"</b> · brutto <b class='mono'>"+fmtEk(b2bNet*1.19)+"</b><br><span style='color:"+(rest>0?"var(--ok)":"var(--bad)")+"'>"+(rest>0?"✓":"✕")+" "+fmtEk(rest)+" ("+restPct.toFixed(0)+" %) über Selbstkosten</span>";
+  }
+  if(rndOn) rndOn.addEventListener("change",e=>{ rndVal.style.display=e.target.checked?"":"none"; b2bCalc(); });
+  if(rndVal) rndVal.addEventListener("input",b2bCalc);
+  if(b2b) b2b.addEventListener("input",b2bCalc);
+  const sp=$("bgSavePrice"); if(sp) sp.addEventListener("click",bgSavePrice);
+  b2bCalc();
+}
+function bgDoSearch(q){
+  q=(q||"").trim().toLowerCase(); const box=$("bgAddRes"); if(!box) return;
+  if(q.length<2){ box.innerHTML=""; return; }
+  const words=q.split(/\s+/), res=[];
+  for(const a of ARTBYMV.values()){
+    if(a.mv_nr===BG_CUR) continue;
+    const hay=((a.bezeichnung||"")+" "+(a.mv_code||"")+" "+(a.art_nr_lieferant||"")+" "+(a.lieferant||"")).toLowerCase();
+    if(words.every(w=>hay.includes(w))){ res.push(a); if(res.length>=40) break; }
+  }
+  box.innerHTML=res.length?res.map(a=>{
+    const isBg=(BOMBYBG.get(a.mv_nr)||[]).length>0||a.typ==="eigenprodukt";
+    const art=(a.typ==="leistung")?"fertigung":"material";
+    return "<div class='frow' style='justify-content:space-between'><span class='fn'>"+esc(a.bezeichnung||"")+" <span class='small muted mono'>"+esc(a.mv_code||"")+"</span>"+(isBg?" <span class='pill'>Baugruppe</span>":"")+"</span><button class='btn' data-addk='"+a.mv_nr+"' data-addart='"+art+"' style='padding:3px 10px'>+ hinzufügen</button></div>";
+  }).join(""):"<div class='small muted'>keine Treffer</div>";
+  box.querySelectorAll("button[data-addk]").forEach(b=>b.addEventListener("click",()=>bgAddComponent(+b.dataset.addk,b.dataset.addart)));
+}
+async function bgAddComponent(kompMv,art){
+  if(kompMv===BG_CUR){ toast("Ein Produkt kann sich nicht selbst enthalten.",true); return; }
+  if(bgReaches(kompMv,BG_CUR)){ toast("Das würde eine Endlosschleife erzeugen (enthält dieses Produkt bereits).",true); return; }
+  const pos=(BOMBYBG.get(BG_CUR)||[]).length;
+  try{
+    const { data, error } = await db.from("stueckliste").insert({baugruppe_mv_nr:BG_CUR,komponente_mv_nr:kompMv,menge:1,art:art||"material",position:pos}).select("*").single();
+    if(error) throw error;
+    if(!BOMBYBG.has(BG_CUR)) BOMBYBG.set(BG_CUR,[]);
+    BOMBYBG.get(BG_CUR).push(data);
+    renderEditor();
+  }catch(e){ toast("Hinzufügen fehlgeschlagen: "+(e.message||e),true); }
+}
+async function bgUpdateLine(id,field,val){
+  const l=(BOMBYBG.get(BG_CUR)||[]).find(x=>x.id===id); if(!l) return;
+  let v=val; if(field==="menge") v=parseNum(val)||0;
+  l[field]=v;
+  try{ const upd={}; upd[field]=v; const { error }=await db.from("stueckliste").update(upd).eq("id",id); if(error) throw error; }
+  catch(e){ toast("Speichern fehlgeschlagen: "+(e.message||e),true); }
+  renderEditor();
+}
+async function bgRemoveLine(id){
+  try{ const { error }=await db.from("stueckliste").delete().eq("id",id); if(error) throw error; }
+  catch(e){ toast("Entfernen fehlgeschlagen: "+(e.message||e),true); return; }
+  BOMBYBG.set(BG_CUR,(BOMBYBG.get(BG_CUR)||[]).filter(x=>x.id!==id));
+  renderEditor();
+}
+async function bgSetFlag(field,val){
+  const a=ARTBYMV.get(BG_CUR); if(!a) return;
+  a[field]=val;
+  try{ const upd={}; upd[field]=val; const { error }=await db.from("artikel").update(upd).eq("mv_nr",BG_CUR); if(error) throw error; }
+  catch(e){ toast("Speichern fehlgeschlagen: "+(e.message||e),true); }
+  renderEditor();
+}
+async function bgSavePrice(){
+  const a=ARTBYMV.get(BG_CUR); if(!a) return;
+  const c=calcProduct(BG_CUR);
+  const manual=$("bgRndOn")&&$("bgRndOn").checked;
+  const brutto=manual?(parseNum($("bgRndVal").value)||0):c.listenBrutto;
+  const val=Math.round(brutto*100)/100;
+  a.vk_inkl=val; a.vk_manuell=!!manual;
+  try{ const { error }=await db.from("artikel").update({vk_inkl:val,vk_manuell:!!manual}).eq("mv_nr",BG_CUR); if(error) throw error; toast("Verkaufspreis gespeichert: "+fmtEk(val)); }
+  catch(e){ toast("Speichern fehlgeschlagen: "+(e.message||e),true); }
+  renderEditor();
+}
 
 /* ---------- Init ---------- */
 setMode("eingang");
