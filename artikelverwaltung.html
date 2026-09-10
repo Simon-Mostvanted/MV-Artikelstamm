@@ -120,7 +120,7 @@
 
   <!-- MODE SWITCH -->
   <div class="row" style="margin-bottom:16px;gap:8px">
-    <button class="btn" id="tabEingang" type="button">📥 Eingang</button>
+    <button class="btn" id="tabEingang" type="button">📥 Rechnungseingang</button>
     <button class="btn ghost" id="tabAnlegen" type="button">➕ Anlegen</button>
     <button class="btn ghost" id="tabBearbeiten" type="button">✏️ Bearbeiten</button>
     <button class="btn ghost" id="tabBaugruppen" type="button">🧩 Baugruppen</button>
@@ -132,7 +132,7 @@
       <div class="small" id="creditBannerTxt" style="margin-top:4px">Neue Rechnungen werden aktuell nicht automatisch ausgelesen. Bitte Guthaben aufladen.</div>
     </div>
     <div class="card">
-      <h2><span class="step-no">📥</span> Eingang — automatisch ausgelesene Rechnungen</h2>
+      <h2><span class="step-no">📥</span> Rechnungseingang — automatisch ausgelesene Rechnungen</h2>
       <div class="sub">Nur Positionen, die <b>gepflegt</b> werden müssen: neu, zu prüfen oder mit abweichendem EK. Vorhandene Artikel mit passendem Preis werden ausgeblendet.</div>
       <div style="display:flex;gap:8px;align-items:center;margin:6px 0 12px">
         <button class="btn" id="eingangReload" type="button">🔄 Aktualisieren</button>
@@ -194,10 +194,10 @@
     <h2><span class="step-no">2</span> Abgleich &amp; Ergänzen</h2>
     <div class="sub">Neue Artikel werden gegen den Supabase-Stamm geprüft (Lieferant + Art.nr.Lieferant, sowie Art.nr.Hersteller). Ergänze die fehlenden Felder – dann übernehmen.</div>
     <div id="eingangBar" class="hidden" style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:12px;padding:8px 12px;border:1px solid var(--accent);border-radius:8px;background:rgba(99,102,241,.08)">
-      <span class="small">📥 Aus Eingang: <b id="eingangBarName"></b></span>
+      <span class="small">📥 Aus Rechnungseingang: <b id="eingangBarName"></b></span>
       <span style="display:flex;gap:6px">
         <button class="btn" id="eingangDoneBtn" type="button">✓ Erledigt &amp; zurück</button>
-        <button class="btn ghost" id="eingangBackBtn" type="button">← Eingang</button>
+        <button class="btn ghost" id="eingangBackBtn" type="button">← Rechnungseingang</button>
       </span>
     </div>
     <div class="summary" id="summary"></div>
@@ -1029,7 +1029,7 @@ async function loadEingang(){
     if(error) throw error;
     rows=data||[];
   }catch(e){
-    list.innerHTML='<div class="small" style="color:var(--warn)">Eingang noch nicht eingerichtet oder nicht erreichbar. Bitte das Setup-SQL <code>rechnung-eingang-setup.sql</code> ausführen.</div>';
+    list.innerHTML='<div class="small" style="color:var(--warn)">Rechnungseingang noch nicht eingerichtet oder nicht erreichbar. Bitte das Setup-SQL <code>rechnung-eingang-setup.sql</code> ausführen.</div>';
     sum.textContent=""; return;
   }
   EINGANG_ROWS = rows;
@@ -1043,7 +1043,7 @@ async function loadEingang(){
   sum.textContent = rows.length
     ? (rows.length+" Rechnung(en) · "+totalActionable+" Position(en) zu pflegen"+((rows.length-withWork)>0?" · "+(rows.length-withWork)+" ohne offene Punkte":""))
     : "";
-  list.innerHTML = rows.length ? cards.join("") : '<div class="small muted">Kein offener Eingang. 🎉</div>';
+  list.innerHTML = rows.length ? cards.join("") : '<div class="small muted">Kein offener Rechnungseingang. 🎉</div>';
   list.querySelectorAll("button[data-open]").forEach(b=>b.addEventListener("click",()=>openEingang(+b.dataset.open)));
   list.querySelectorAll("button[data-done]").forEach(b=>b.addEventListener("click",()=>markEingang(+b.dataset.done,"erledigt")));
   list.querySelectorAll("button[data-ign]").forEach(b=>b.addEventListener("click",()=>markEingang(+b.dataset.ign,"ignoriert")));
