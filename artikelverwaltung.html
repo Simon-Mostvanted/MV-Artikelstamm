@@ -215,14 +215,14 @@
       <div>
         <label>Warengruppe für alle Neuen setzen</label>
         <div style="display:flex;gap:6px">
-          <input id="bulkWg" type="text" placeholder="z. B. Verbrauchsmaterial">
+          <select id="bulkWg"></select>
           <button class="btn ghost" id="bulkWgBtn" type="button">↧ übernehmen</button>
         </div>
       </div>
       <div>
         <label>Lagerort für alle Neuen setzen</label>
         <div style="display:flex;gap:6px">
-          <input id="bulkLo" type="text" placeholder="z. B. Lager A">
+          <select id="bulkLo"></select>
           <button class="btn ghost" id="bulkLoBtn" type="button">↧ übernehmen</button>
         </div>
       </div>
@@ -853,6 +853,7 @@ const COLS = [
 ];
 function renderNewTable(){
   const t=$("newTable");
+  fillBulkSelects();
   if(!NEWROWS.length){ t.innerHTML="<tbody><tr><td style='padding:16px;color:var(--muted)'>Keine neuen Artikel – alle erfassten sind bereits im Stamm. Details in der Liste der uebersprungenen Artikel unten.</td></tr></tbody>"; return; }
   let html="<thead><tr><th>#</th>";
   for(const [,label] of COLS) html+="<th>"+label+"</th>";
@@ -866,7 +867,11 @@ function renderNewTable(){
     html+="<tr"+(warn?" style=\"background:rgba(245,158,11,.10)\"":"")+"><td class='muted'>"+(i+1)+wIcon+"</td>";
     for(const [field,,w] of COLS){
       const val = r[field]==null?"":r[field];
-      html+="<td><input class='"+(w||"")+"' data-i='"+i+"' data-f='"+field+"' value=\""+String(val).replace(/"/g,"&quot;")+"\"></td>";
+      if(field==="warengruppe"||field==="lagerort"||field==="lagerplatz"){
+        html+="<td>"+listSelectHtml(field, val, "data-i='"+i+"' data-f='"+field+"' class='"+(w||"")+"'")+"</td>";
+      } else {
+        html+="<td><input class='"+(w||"")+"' data-i='"+i+"' data-f='"+field+"' value=\""+String(val).replace(/"/g,"&quot;")+"\"></td>";
+      }
     }
     html+="<td><select data-i='"+i+"' data-f='etikett_typ'>"+
       ["","Regal","Artikel","kein"].map(o=>"<option "+(r.etikett_typ===o?"selected":"")+" value='"+o+"'>"+(o||"—")+"</option>").join("")+
@@ -874,7 +879,7 @@ function renderNewTable(){
     html+="<td><button class='btn ghost' data-rm='"+i+"' title='Zeile entfernen' style='padding:4px 9px'>✕</button></td></tr>";
   });
   html+="</tbody>"; t.innerHTML=html;
-  t.querySelectorAll("input,select").forEach(el=>{
+  t.querySelectorAll("input,select:not([data-listkat])").forEach(el=>{
     el.addEventListener("change", ()=>{ const i=+el.dataset.i, f=el.dataset.f; let v=el.value;
       if(f==="ek_exkl"||f==="vk_inkl") v=parseNum(v);
       NEWROWS[i][f]=v; });
@@ -1049,6 +1054,57 @@ async function listenDelete(kat, id){
     toast("Gelöscht: "+it.wert); loadListen();
   }catch(e){ toast("Fehler: "+(e.message||e), true); }
 }
+
+/* ----- Dropdown-Auswahlfelder (Warengruppe/Lagerort/Lagerplatz) ----- */
+function katLabel(kat){ const m={warengruppe:"Warengruppe",lagerort:"Lagerort",lagerplatz:"Lagerplatz"}; return m[kat]||kat; }
+function listSelectOptions(kat, current){
+  const items=(LISTEN[kat]||[]).map(x=>x.wert);
+  const cur=current==null?"":String(current);
+  let o='<option value="">— (leer)</option>';
+  if(cur!=="" && !items.includes(cur)) o+='<option value="'+esc(cur)+'" selected>'+esc(cur)+' (nicht in Liste)</option>';
+  o+=items.map(w=>'<option value="'+esc(w)+'"'+(w===cur?' selected':'')+'>'+esc(w)+'</option>').join("");
+  o+='<option value="__new__">＋ neuer Wert…</option>';
+  return o;
+}
+function listSelectHtml(kat, current, attrs){
+  const cur=current==null?"":String(current);
+  return '<select data-listkat="'+kat+'" data-prev="'+esc(cur)+'" '+(attrs||"")+'>'+listSelectOptions(kat,cur)+'</select>';
+}
+async function listAddValue(kat, wert){
+  if((LISTEN[kat]||[]).some(x=>x.wert===wert)) return true;
+  try{
+    const maxSort=Math.max(0,...(LISTEN[kat]||[]).map(x=>x.sortierung||0));
+    const { data, error } = await db.from("stammdaten_liste").insert({kategorie:kat,wert,sortierung:maxSort+1}).select("*").single();
+    if(error) throw error;
+    (LISTEN[kat]=LISTEN[kat]||[]).push(data);
+    toast("Wert hinzugefügt: "+wert); return true;
+  }catch(e){ toast(/duplicate|unique/i.test(e.message||"")?"Wert existiert bereits.":"Fehler: "+(e.message||e), true); return false; }
+}
+function refreshListSelects(kat){
+  document.querySelectorAll('select[data-listkat="'+kat+'"]').forEach(s=>{
+    const v = s.value==="__new__" ? (s.dataset.prev||"") : s.value;
+    s.innerHTML=listSelectOptions(kat, v); s.value=v; s.dataset.prev=v;
+  });
+}
+async function onListSelectChange(sel){
+  const kat=sel.dataset.listkat;
+  if(sel.value==="__new__"){
+    const neu=(prompt("Neuer Wert für "+katLabel(kat)+":","")||"").trim();
+    if(!neu){ sel.value=sel.dataset.prev||""; return; }
+    const ok=await listAddValue(kat, neu);
+    if(!ok){ sel.value=sel.dataset.prev||""; return; }
+    refreshListSelects(kat);
+    sel.value=neu;
+  }
+  sel.dataset.prev=sel.value;
+  // Anlege-Tabelle: Modell mitziehen
+  if(sel.dataset.f!=null && sel.dataset.i!=null && typeof NEWROWS!=="undefined" && NEWROWS[+sel.dataset.i]) NEWROWS[+sel.dataset.i][sel.dataset.f]=sel.value;
+}
+function fillBulkSelects(){
+  const wg=$("bulkWg"), lo=$("bulkLo");
+  if(wg) wg.innerHTML='<option value="">— Warengruppe wählen —</option>'+(LISTEN.warengruppe||[]).map(x=>'<option value="'+esc(x.wert)+'">'+esc(x.wert)+'</option>').join("");
+  if(lo) lo.innerHTML='<option value="">— Lagerort wählen —</option>'+(LISTEN.lagerort||[]).map(x=>'<option value="'+esc(x.wert)+'">'+esc(x.wert)+'</option>').join("");
+}
 $("bgReload").addEventListener("click", loadBaugruppen);
 $("bgNew").addEventListener("click", ()=>newBaugruppe());
 $("eingangReload").addEventListener("click", loadEingang);
@@ -1187,7 +1243,7 @@ const EDIT_FIELDS = [
   ["bezeichnung","Bezeichnung","text","full"],
   ["lieferant","Lieferant","text"], ["art_nr_lieferant","Art.nr. Lieferant","text"],
   ["hersteller","Hersteller","text"], ["art_nr_hersteller","Art.nr. Hersteller / EAN","text"],
-  ["warengruppe","Warengruppe","text"], ["lagerort","Lagerort","text"], ["lagerplatz","Lagerplatz","text"],
+  ["warengruppe","Warengruppe","list"], ["lagerort","Lagerort","list"], ["lagerplatz","Lagerplatz","list"],
   ["mass","Maß","text"], ["farbe","Farbe","text"],
   ["einheit","Einheit","text"], ["vpe_menge","VPE-Größe","num"],
   ["ek_exkl","EK (exkl., pro Einheit)","num"], ["vk_inkl","VK (inkl.)","num"], ["gewicht_kg","Gewicht (kg)","num"],
@@ -1250,6 +1306,7 @@ function loadEditForm(a){
   $("editFields").innerHTML = EDIT_FIELDS.map(f=>{
     const col=f[0], label=f[1], type=f[2], full=f[3]==="full";
     const wrap = (inner)=>`<div${full?" style=\"grid-column:1/-1\"":""}><label>${label}</label>${inner}</div>`;
+    if(type==="list") return wrap(listSelectHtml(col, a[col], 'id="ef_'+col+'"'));
     if(type==="select") return wrap(`<select id="ef_${col}">`+["","Regal","Artikel","kein"].map(o=>`<option ${a[col]===o?"selected":""} value="${o}">${o||"—"}</option>`).join("")+`</select>`);
     if(type==="bool") return wrap(`<select id="ef_${col}"><option value="false" ${!a[col]?"selected":""}>nein</option><option value="true" ${a[col]?"selected":""}>ja</option></select>`);
     return wrap(`<input id="ef_${col}" type="text" value="${esc(a[col]==null?"":a[col])}">`);
@@ -1265,6 +1322,7 @@ $("editSaveBtn").addEventListener("click", async ()=>{
     if(type==="num") payload[col]=parseNum(el.value);
     else if(type==="bool") payload[col]=(el.value==="true");
     else if(type==="select") payload[col]=el.value||null;
+    else if(type==="list"){ const v=(el.value==="__new__"?"":el.value).trim(); payload[col]= v===""?null:v; }
     else { const v=el.value.trim(); payload[col]= v===""?null:v; }
   });
   $("editSaveBtn").disabled=true; $("editSaveInfo").innerHTML='<span class="spin"></span> speichere…';
@@ -1569,7 +1627,9 @@ async function bgSavePrice(){
 }
 
 /* ---------- Init ---------- */
+document.addEventListener("change", e=>{ const s=e.target; if(s && s.tagName==="SELECT" && s.dataset && s.dataset.listkat!=null) onListSelectChange(s); });
 setMode("eingang");
+loadListenData().catch(()=>{});
 loadStamm().then(loadEingang);
 </script>
 </body>
