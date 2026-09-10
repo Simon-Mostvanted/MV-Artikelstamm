@@ -124,6 +124,7 @@
     <button class="btn ghost" id="tabAnlegen" type="button">➕ Anlegen</button>
     <button class="btn ghost" id="tabBearbeiten" type="button">✏️ Bearbeiten</button>
     <button class="btn ghost" id="tabBaugruppen" type="button">🧩 Baugruppen</button>
+    <button class="btn ghost" id="tabListen" type="button">⚙ Listen</button>
   </div>
 
   <div id="modeEingang">
@@ -282,6 +283,15 @@
       <div id="bgList"></div>
     </div>
     <div id="bgEditor"></div>
+  </div>
+
+  <div id="modeListen" class="hidden">
+    <div class="card">
+      <h2><span class="step-no">⚙</span> Listen verwalten</h2>
+      <div class="sub">Erlaubte Werte für die Dropdowns (Warengruppe, Lagerort, Lagerplatz). <b>Umbenennen</b> zieht alle betroffenen Artikel mit; <b>Löschen</b> entfernt nur die Auswahl — die Artikel behalten ihren Text.</div>
+      <div class="row" style="margin:8px 0"><button class="btn" id="listenReload" type="button">🔄 Aktualisieren</button></div>
+    </div>
+    <div id="listenBox"></div>
   </div>
 </main>
 
@@ -945,16 +955,100 @@ function setMode(mode){
   $("modeAnlegen").classList.toggle("hidden", mode!=="anlegen");
   $("modeBearbeiten").classList.toggle("hidden", mode!=="bearbeiten");
   $("modeBaugruppen").classList.toggle("hidden", mode!=="baugruppen");
+  $("modeListen").classList.toggle("hidden", mode!=="listen");
   $("tabEingang").className    = "btn"+(mode==="eingang"?"":" ghost");
   $("tabAnlegen").className     = "btn"+(mode==="anlegen"?"":" ghost");
   $("tabBearbeiten").className  = "btn"+(mode==="bearbeiten"?"":" ghost");
   $("tabBaugruppen").className  = "btn"+(mode==="baugruppen"?"":" ghost");
+  $("tabListen").className      = "btn"+(mode==="listen"?"":" ghost");
   const eb=$("eingangBar"); if(eb) eb.classList.toggle("hidden", !(mode==="anlegen" && EINGANG_CURRENT));
 }
 $("tabEingang").addEventListener("click", ()=>{ setMode("eingang"); loadEingang(); });
 $("tabAnlegen").addEventListener("click", ()=>{ EINGANG_CURRENT=null; HIDE_OK_MATCHED=false; setMode("anlegen"); });
 $("tabBearbeiten").addEventListener("click", ()=>setMode("bearbeiten"));
 $("tabBaugruppen").addEventListener("click", ()=>{ setMode("baugruppen"); loadBaugruppen(); });
+$("tabListen").addEventListener("click", ()=>{ setMode("listen"); loadListen(); });
+$("listenReload").addEventListener("click", loadListen);
+
+/* ============ Stammdaten-Listen (Dropdown-Werte verwalten) ============ */
+let LISTEN = { warengruppe:[], lagerort:[], lagerplatz:[] };
+const LISTEN_KATS = [["warengruppe","Warengruppe"],["lagerort","Lagerort"],["lagerplatz","Lagerplatz"]];
+async function loadListenData(){
+  const { data, error } = await db.from("stammdaten_liste").select("*").eq("aktiv",true)
+    .order("kategorie",{ascending:true}).order("sortierung",{ascending:true}).order("wert",{ascending:true});
+  if(error) throw error;
+  LISTEN={warengruppe:[],lagerort:[],lagerplatz:[]};
+  (data||[]).forEach(r=>{ (LISTEN[r.kategorie]=LISTEN[r.kategorie]||[]).push(r); });
+  return LISTEN;
+}
+function countUsage(kat, wert){
+  if(!STAMM.loaded) return null;
+  let c=0; for(const r of STAMM.rows){ if((r[kat]||"")===wert) c++; } return c;
+}
+async function loadListen(){
+  const box=$("listenBox"); box.innerHTML='<div class="small muted">lädt…</div>';
+  try{ await loadListenData(); }
+  catch(e){ box.innerHTML='<div class="small" style="color:var(--warn)">Listen-Tabelle nicht erreichbar. Wurde <code>stammdaten-liste-setup.sql</code> ausgeführt?</div>'; return; }
+  if(!STAMM.loaded){ try{ await loadStamm(); }catch(e){} }
+  box.innerHTML = LISTEN_KATS.map(([kat,label])=>{
+    const items=LISTEN[kat]||[];
+    const rows=items.map(it=>{
+      const c=countUsage(kat, it.wert);
+      return "<div class='frow' style='align-items:center;gap:8px'>"+
+        "<span class='fn'>"+esc(it.wert)+(c!=null?" <span class='small muted'>· "+c+" Artikel</span>":"")+"</span>"+
+        "<button class='btn ghost' data-ren='"+kat+":"+it.id+"' style='padding:3px 10px'>umbenennen</button>"+
+        "<button class='btn ghost' data-del='"+kat+":"+it.id+"' style='padding:3px 10px'>löschen</button>"+
+      "</div>";
+    }).join("");
+    return "<div class='card'>"+
+      "<h2 style='font-size:16px;margin:0 0 8px'>"+label+" <span class='small muted'>("+items.length+")</span></h2>"+
+      "<div class='row' style='gap:6px;margin-bottom:10px'>"+
+        "<input id='add_"+kat+"' type='text' placeholder='Neuer Wert…' style='max-width:280px'>"+
+        "<button class='btn ok' data-add='"+kat+"' style='padding:4px 12px'>＋ Hinzufügen</button>"+
+      "</div>"+
+      "<div>"+(rows||"<div class='small muted'>Noch keine Werte.</div>")+"</div>"+
+    "</div>";
+  }).join("");
+  box.querySelectorAll("button[data-add]").forEach(b=>b.addEventListener("click",()=>listenAdd(b.dataset.add)));
+  box.querySelectorAll("input[id^='add_']").forEach(inp=>inp.addEventListener("keydown",e=>{ if(e.key==="Enter") listenAdd(inp.id.slice(4)); }));
+  box.querySelectorAll("button[data-ren]").forEach(b=>b.addEventListener("click",()=>{ const [k,id]=b.dataset.ren.split(":"); listenRename(k,+id); }));
+  box.querySelectorAll("button[data-del]").forEach(b=>b.addEventListener("click",()=>{ const [k,id]=b.dataset.del.split(":"); listenDelete(k,+id); }));
+}
+async function listenAdd(kat){
+  const el=$("add_"+kat); const wert=(el.value||"").trim(); if(!wert) return;
+  try{
+    const maxSort=Math.max(0,...(LISTEN[kat]||[]).map(x=>x.sortierung||0));
+    const { error } = await db.from("stammdaten_liste").insert({kategorie:kat, wert, sortierung:maxSort+1});
+    if(error) throw error;
+    el.value=""; toast("Hinzugefügt: "+wert); loadListen();
+  }catch(e){ toast(/duplicate|unique/i.test(e.message||"")?"Wert existiert in dieser Liste bereits.":"Fehler: "+(e.message||e), true); }
+}
+async function listenRename(kat, id){
+  const it=(LISTEN[kat]||[]).find(x=>x.id===id); if(!it) return;
+  const neu=(prompt("Wert umbenennen:", it.wert)||"").trim();
+  if(!neu || neu===it.wert) return;
+  const c0=countUsage(kat, it.wert)||0;
+  try{
+    const { error:e1 } = await db.from("stammdaten_liste").update({wert:neu}).eq("id", id);
+    if(e1) throw e1;
+    const { error:e2 } = await db.from("artikel").update({[kat]:neu}).eq(kat, it.wert);
+    if(e2) throw e2;
+    if(STAMM.loaded) for(const r of STAMM.rows){ if((r[kat]||"")===it.wert) r[kat]=neu; }
+    toast("Umbenannt: "+neu+" · "+c0+" Artikel angepasst");
+    loadListen();
+  }catch(e){ toast(/duplicate|unique/i.test(e.message||"")?"Ein Wert mit diesem Namen existiert bereits.":"Fehler: "+(e.message||e), true); }
+}
+async function listenDelete(kat, id){
+  const it=(LISTEN[kat]||[]).find(x=>x.id===id); if(!it) return;
+  const c=countUsage(kat, it.wert);
+  const warn = c ? ("\n\nAchtung: "+c+" Artikel nutzen diesen Wert noch. Sie behalten ihren Text, der Wert wird nur nicht mehr zur Auswahl angeboten.") : "";
+  if(!confirm('Wert "'+it.wert+'" löschen?'+warn)) return;
+  try{
+    const { error } = await db.from("stammdaten_liste").delete().eq("id", id);
+    if(error) throw error;
+    toast("Gelöscht: "+it.wert); loadListen();
+  }catch(e){ toast("Fehler: "+(e.message||e), true); }
+}
 $("bgReload").addEventListener("click", loadBaugruppen);
 $("bgNew").addEventListener("click", ()=>newBaugruppe());
 $("eingangReload").addEventListener("click", loadEingang);
