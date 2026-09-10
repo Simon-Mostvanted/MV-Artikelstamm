@@ -1032,18 +1032,27 @@ async function loadEingang(){
     list.innerHTML='<div class="small" style="color:var(--warn)">Rechnungseingang noch nicht eingerichtet oder nicht erreichbar. Bitte das Setup-SQL <code>rechnung-eingang-setup.sql</code> ausführen.</div>';
     sum.textContent=""; return;
   }
-  EINGANG_ROWS = rows;
-  let totalActionable=0, withWork=0;
-  const cards = rows.map(row=>{
-    const cl=classifyEingang(row);
-    if(cl.actionable>0) withWork++;
-    totalActionable+=cl.actionable;
-    return eingangCardHtml(row, cl);
-  });
-  sum.textContent = rows.length
-    ? (rows.length+" Rechnung(en) · "+totalActionable+" Position(en) zu pflegen"+((rows.length-withWork)>0?" · "+(rows.length-withWork)+" ohne offene Punkte":""))
-    : "";
-  list.innerHTML = rows.length ? cards.join("") : '<div class="small muted">Kein offener Rechnungseingang. 🎉</div>';
+  // Klassifizieren; Rechnungen ohne zu pflegende Positionen werden automatisch erledigt
+  const classified = rows.map(row=>({row, cl:classifyEingang(row)}));
+  const done = classified.filter(x=>x.cl.actionable===0);
+  const todo = classified.filter(x=>x.cl.actionable>0);
+
+  // Auto-Erledigung leerer Rechnungen (einmalig – danach nicht mehr 'offen', kein erneutes Prüfen)
+  if(done.length){
+    try{
+      await db.from("rechnung_eingang")
+        .update({status:"erledigt", verarbeitet_am:new Date().toISOString()})
+        .in("id", done.map(x=>x.row.id));
+    }catch(e){ /* unkritisch: bleiben sonst 'offen' und werden beim nächsten Laden erneut geprüft */ }
+  }
+
+  EINGANG_ROWS = todo.map(x=>x.row);
+  let totalActionable=0;
+  const cards = todo.map(x=>{ totalActionable+=x.cl.actionable; return eingangCardHtml(x.row, x.cl); });
+  sum.textContent = todo.length
+    ? (todo.length+" Rechnung(en) · "+totalActionable+" Position(en) zu pflegen"+(done.length?" · "+done.length+" automatisch erledigt":""))
+    : (done.length ? done.length+" Rechnung(en) automatisch erledigt (nichts zu pflegen)" : "");
+  list.innerHTML = todo.length ? cards.join("") : '<div class="small muted">Kein offener Rechnungseingang. 🎉</div>';
   list.querySelectorAll("button[data-open]").forEach(b=>b.addEventListener("click",()=>openEingang(+b.dataset.open)));
   list.querySelectorAll("button[data-done]").forEach(b=>b.addEventListener("click",()=>markEingang(+b.dataset.done,"erledigt")));
   list.querySelectorAll("button[data-ign]").forEach(b=>b.addEventListener("click",()=>markEingang(+b.dataset.ign,"ignoriert")));
