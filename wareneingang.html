@@ -137,7 +137,7 @@
       <div class="grid2">
         <div><label>Lieferant (für die Ablage)</label><input id="archLief" type="text" placeholder="Lieferant"></div>
         <div><label>Lieferschein-Nr.</label><input id="archLsnr" type="text" placeholder="falls vorhanden"></div>
-        <div><label>Lagerort</label><input id="archLager" type="text" placeholder="z. B. Regal A3"></div>
+        <div><label>Lagerort</label><select id="archLager"></select></div>
         <div><label>Kommission</label><input id="archKomm" type="text" placeholder="optional"></div>
       </div>
       <label style="margin-top:8px">Notiz</label>
@@ -494,9 +494,9 @@ function posInner(r,i){
             '<div><label>Art.nr. Lieferant</label><input type="text" name="art_nr_lieferant" value="'+esc(artLief)+'"></div>'+
             '<div><label>Art.nr. Hersteller</label><input type="text" name="art_nr_hersteller" value="'+esc(artHerst)+'"></div>'+
             '<div class="full"><label>Lieferant</label><input type="text" name="lieferant" value="'+esc(clean(SENDER))+'"></div>'+
-            '<div><label>Lagerort</label><input type="text" name="lagerort" value=""></div>'+
-            '<div><label>Lagerplatz</label><input type="text" name="lagerplatz" value=""></div>'+
-            '<div><label>Warengruppe</label><input type="text" name="warengruppe" value=""></div>'+
+            '<div><label>Lagerort</label>'+listSelectHtml("lagerort","",'name="lagerort"')+'</div>'+
+            '<div><label>Lagerplatz</label>'+listSelectHtml("lagerplatz","",'name="lagerplatz"')+'</div>'+
+            '<div><label>Warengruppe</label>'+listSelectHtml("warengruppe","",'name="warengruppe"')+'</div>'+
             '<div><label>Maße</label><input type="text" name="mass" value=""></div>'+
             '<div class="full"><label>Etikett-Typ</label><select name="etikett_typ"><option value="Artikel">Artikel</option><option value="Regal">Regal</option><option value="kein">kein</option></select></div>'+
           '</div>'+
@@ -730,7 +730,7 @@ async function doStammFix(i, formEl, btn){
 }
 
 async function doInsert(i, formEl, btn){
-  const g=(name)=>{ const el=formEl.querySelector('[name="'+name+'"]'); return el?el.value.trim():""; };
+  const g=(name)=>{ const el=formEl.querySelector('[name="'+name+'"]'); if(!el) return ""; const v=el.value; return v==="__new__"?"":v.trim(); };
   const bezeichnung=g("bezeichnung");
   if(!bezeichnung){ toast("Bezeichnung fehlt.",true); return; }
   const lieferant=g("lieferant");
@@ -917,7 +917,67 @@ function resetArchiveForNote(){
 }
 $("nextBtn").addEventListener("click",()=>{ resetAll(); window.scrollTo({top:0,behavior:"smooth"}); });
 
+/* ---- Stammdaten-Listen (Dropdowns: Warengruppe/Lagerort/Lagerplatz) ---- */
+let LISTEN={warengruppe:[],lagerort:[],lagerplatz:[]};
+function katLabel(k){ return ({warengruppe:"Warengruppe",lagerort:"Lagerort",lagerplatz:"Lagerplatz"})[k]||k; }
+async function loadListenData(){
+  try{
+    const {data,error}=await db.from("stammdaten_liste").select("*").eq("aktiv",true)
+      .order("kategorie",{ascending:true}).order("sortierung",{ascending:true}).order("wert",{ascending:true});
+    if(error) throw error;
+    LISTEN={warengruppe:[],lagerort:[],lagerplatz:[]};
+    (data||[]).forEach(r=>{ (LISTEN[r.kategorie]=LISTEN[r.kategorie]||[]).push(r); });
+  }catch(e){ /* Liste optional */ }
+  fillArchLager();
+}
+function listSelectOptions(kat,current){
+  const items=(LISTEN[kat]||[]).map(x=>x.wert);
+  const cur=current==null?"":String(current);
+  let o='<option value="">— (leer)</option>';
+  if(cur!=="" && !items.includes(cur)) o+='<option value="'+esc(cur)+'" selected>'+esc(cur)+' (nicht in Liste)</option>';
+  o+=items.map(w=>'<option value="'+esc(w)+'"'+(w===cur?' selected':'')+'>'+esc(w)+'</option>').join("");
+  o+='<option value="__new__">＋ neuer Wert…</option>';
+  return o;
+}
+function listSelectHtml(kat,current,attrs){
+  const cur=current==null?"":String(current);
+  return '<select data-listkat="'+kat+'" data-prev="'+esc(cur)+'" '+(attrs||"")+'>'+listSelectOptions(kat,cur)+'</select>';
+}
+async function listAddValue(kat,wert){
+  if((LISTEN[kat]||[]).some(x=>x.wert===wert)) return true;
+  try{
+    const maxSort=Math.max(0,...(LISTEN[kat]||[]).map(x=>x.sortierung||0));
+    const {data,error}=await db.from("stammdaten_liste").insert({kategorie:kat,wert,sortierung:maxSort+1}).select("*").single();
+    if(error) throw error;
+    (LISTEN[kat]=LISTEN[kat]||[]).push(data); toast("Wert hinzugefügt: "+wert); return true;
+  }catch(e){ toast(/duplicate|unique/i.test(e.message||"")?"Wert existiert bereits.":"Fehler: "+(e.message||e),true); return false; }
+}
+function refreshListSelects(kat){
+  document.querySelectorAll('select[data-listkat="'+kat+'"]').forEach(s=>{
+    const v=s.value==="__new__"?(s.dataset.prev||""):s.value;
+    s.innerHTML=listSelectOptions(kat,v); s.value=v; s.dataset.prev=v;
+  });
+}
+async function onListSelectChange(sel){
+  const kat=sel.dataset.listkat;
+  if(sel.value==="__new__"){
+    const neu=(prompt("Neuer Wert für "+katLabel(kat)+":","")||"").trim();
+    if(!neu){ sel.value=sel.dataset.prev||""; return; }
+    const ok=await listAddValue(kat,neu);
+    if(!ok){ sel.value=sel.dataset.prev||""; return; }
+    refreshListSelects(kat); sel.value=neu;
+  }
+  sel.dataset.prev=sel.value;
+}
+function fillArchLager(){
+  const el=$("archLager"); if(!el||el.tagName!=="SELECT") return;
+  const cur=el.value||"";
+  el.innerHTML='<option value="">— Lagerort wählen —</option>'+(LISTEN.lagerort||[]).map(x=>'<option value="'+esc(x.wert)+'"'+(x.wert===cur?' selected':'')+'>'+esc(x.wert)+'</option>').join("");
+}
+document.addEventListener("change",e=>{ const s=e.target; if(s&&s.tagName==="SELECT"&&s.dataset&&s.dataset.listkat!=null) onListSelectChange(s); });
+
 setBanner();
+loadListenData();
 loadStamm();
 loadToday();
 loadOpenOrders();
