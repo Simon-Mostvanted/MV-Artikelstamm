@@ -696,13 +696,15 @@ function renderMatched(){
       const st = (m.ekStatus==="missing") ? "Stamm hat keinen EK" : ("Stamm-EK: "+fmtEk(m.stEk));
       const eh = esc(m.einheit||"Einheit");
       if(m.vpe>1){
-        ekLine="<span style='color:var(--warn)'>"+st+" · Rechnung <b>"+fmtEk(m.invRaw)+"</b> · VPE-Größe "+m.vpe+" → pro "+eh+" <b>"+fmtEk(m.perVPE)+"</b></span>";
-        const bV="<button class='"+(m.basis==="vpe"?"btn":"btn ghost")+"' data-ek='"+i+"' data-basis='vpe' style='padding:4px 10px'>"+fmtEk(m.perVPE)+" (Rechnung pro VPE)</button>";
-        const bE="<button class='"+(m.basis==="einheit"?"btn":"btn ghost")+"' data-ek='"+i+"' data-basis='einheit' style='padding:4px 10px'>"+fmtEk(m.perUnit)+" (pro "+eh+")</button>";
+        ekLine="<span style='color:var(--warn)'>"+st+" · Rechnungspreis <b>"+fmtEk(m.invRaw)+"</b> · VPE = "+m.vpe+" "+eh+"</span>"+
+          "<br><span class='small muted'>Gespeichert wird der EK <b>pro "+eh+"</b> — worauf bezieht sich der Rechnungspreis?</span>";
+        const recV=m.basis==="vpe", recE=m.basis==="einheit";
+        const bV="<button class='"+(recV?"btn":"btn ghost")+"' data-ek='"+i+"' data-basis='vpe' style='padding:4px 10px' title='Rechnungspreis gilt für die ganze VPE ("+m.vpe+" "+eh+"), also geteilt durch "+m.vpe+"'>Rechnung je VPE → speichert <b>"+fmtEk(m.perVPE)+"</b>/"+eh+(recV?" · wahrscheinlich":"")+"</button>";
+        const bE="<button class='"+(recE?"btn":"btn ghost")+"' data-ek='"+i+"' data-basis='einheit' style='padding:4px 10px' title='Rechnungspreis gilt bereits für 1 "+eh+"'>Rechnung je "+eh+" → speichert <b>"+fmtEk(m.perUnit)+"</b>/"+eh+(recE?" · wahrscheinlich":"")+"</button>";
         buttons=bV+" "+bE;
       } else {
-        ekLine="<span style='color:var(--warn)'>"+st+" · Rechnung: <b>"+fmtEk(m.invRaw)+"</b></span>";
-        buttons="<button class='btn' data-ek='"+i+"' data-basis='einheit' style='padding:4px 12px'>EK aktualisieren</button>";
+        ekLine="<span style='color:var(--warn)'>"+st+" · Rechnungspreis <b>"+fmtEk(m.invRaw)+"</b> pro "+eh+"</span>";
+        buttons="<button class='btn' data-ek='"+i+"' data-basis='einheit' style='padding:4px 12px' title='Speichert den EK pro "+eh+"'>EK auf <b>"+fmtEk(m.perUnit)+"</b>/"+eh+" setzen</button>";
       }
     }
     return "<div class='frow' style='align-items:center;flex-wrap:wrap;gap:6px'>"+
