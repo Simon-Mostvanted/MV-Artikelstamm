@@ -1037,21 +1037,29 @@ async function loadEingang(){
   const done = classified.filter(x=>x.cl.actionable===0);
   const todo = classified.filter(x=>x.cl.actionable>0);
 
-  // Auto-Erledigung leerer Rechnungen (einmalig – danach nicht mehr 'offen', kein erneutes Prüfen)
+  // Auto-Erledigung leerer Rechnungen: eigener Status 'auto_erledigt' -> aus der offenen Liste raus, aber zählbar
   if(done.length){
     try{
       await db.from("rechnung_eingang")
-        .update({status:"erledigt", verarbeitet_am:new Date().toISOString()})
+        .update({status:"auto_erledigt", verarbeitet_am:new Date().toISOString()})
         .in("id", done.map(x=>x.row.id));
     }catch(e){ /* unkritisch: bleiben sonst 'offen' und werden beim nächsten Laden erneut geprüft */ }
   }
 
+  // persistente Zahl der automatisch erledigten Rechnungen (bleibt auch nach Reload sichtbar)
+  let autoDone=0;
+  try{
+    const { count } = await db.from("rechnung_eingang").select("id",{count:"exact",head:true}).eq("status","auto_erledigt");
+    autoDone = count||0;
+  }catch(e){}
+
   EINGANG_ROWS = todo.map(x=>x.row);
   let totalActionable=0;
   const cards = todo.map(x=>{ totalActionable+=x.cl.actionable; return eingangCardHtml(x.row, x.cl); });
+  const autoTxt = autoDone ? autoDone+" automatisch erledigt (nichts zu pflegen)" : "";
   sum.textContent = todo.length
-    ? (todo.length+" Rechnung(en) · "+totalActionable+" Position(en) zu pflegen"+(done.length?" · "+done.length+" automatisch erledigt":""))
-    : (done.length ? done.length+" Rechnung(en) automatisch erledigt (nichts zu pflegen)" : "");
+    ? (todo.length+" Rechnung(en) · "+totalActionable+" Position(en) zu pflegen"+(autoTxt?" · "+autoTxt:""))
+    : (autoTxt || "");
   list.innerHTML = todo.length ? cards.join("") : '<div class="small muted">Kein offener Rechnungseingang. 🎉</div>';
   list.querySelectorAll("button[data-open]").forEach(b=>b.addEventListener("click",()=>openEingang(+b.dataset.open)));
   list.querySelectorAll("button[data-done]").forEach(b=>b.addEventListener("click",()=>markEingang(+b.dataset.done,"erledigt")));
