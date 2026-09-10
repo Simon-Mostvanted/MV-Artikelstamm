@@ -338,7 +338,7 @@ async function loadStamm(){
     let all=[], from=0, page=1000;
     while(true){
       const { data, error } = await db.from("artikel")
-        .select("mv_nr,mv_code,art_nr_lieferant,art_nr_hersteller,lieferant,bezeichnung,ek_exkl,vpe_menge,einheit")
+        .select("*")
         .order("mv_nr",{ascending:true}).range(from, from+page-1);
       if(error) throw error;
       all = all.concat(data||[]);
@@ -1106,6 +1106,8 @@ $("editSearchBtn").addEventListener("click", editSearch);
 $("editSearch").addEventListener("keydown", e=>{ if(e.key==="Enter") editSearch(); });
 function normLoose(s){ return norm(s).replace(/[\s.\-_/]/g,""); }
 function countOcc(text, term){ if(!term) return 0; let n=0,i=0; while((i=text.indexOf(term,i))!==-1){ n++; i+=term.length; } return n; }
+/* Felder, die zusätzlich zur Bezeichnung durchsucht werden (Herstellername, Lagerort, Maß … alle sinnvollen Textspalten). */
+const SEARCH_OTHER_FIELDS = ["lieferant","hersteller","art_nr_lieferant","art_nr_hersteller","mv_code","warengruppe","lagerort","lagerplatz","mass","farbe","einheit","bestellweg","produktlink","bestell_mail"];
 /* Kontext-/Mehrwortsuche über den geladenen Stamm (wie in der Bestell-App):
    exakte Artikelnummer zuerst; sonst muss JEDES Wort vorkommen, Treffer im Namen zählen doppelt. */
 function searchStamm(q){
@@ -1122,7 +1124,7 @@ function searchStamm(q){
   const scored=[];
   for(const a of STAMM.rows){
     const bez=(a.bezeichnung||"").toLowerCase();
-    const other=((a.lieferant||"")+" "+(a.art_nr_lieferant||"")+" "+(a.art_nr_hersteller||"")+" "+(a.mv_code||"")).toLowerCase();
+    const other=SEARCH_OTHER_FIELDS.map(f=>a[f]==null?"":a[f]).join(" ").toLowerCase();
     let score=0, all=true;
     for(const t of terms){
       const cb=countOcc(bez,t), co=countOcc(other,t);
@@ -1134,22 +1136,15 @@ function searchStamm(q){
   scored.sort((x,y)=>y.score-x.score);         // meiste Treffer zuerst
   return scored.map(s=>s.a);
 }
-async function editSearch(){
+function editSearch(){
   const q=$("editSearch").value.trim(); if(!q){ $("editResults").innerHTML=""; return; }
   if(!STAMM.loaded){ toast("Bitte zuerst den Stamm laden (oben).", true); return; }
   const matches=searchStamm(q);
   if(!matches.length){ $("editResults").innerHTML='<div class="small muted">Keine Treffer.</div>'; return; }
-  const top=matches.slice(0,100);
-  $("editResults").innerHTML='<div class="small muted">lädt…</div>';
-  // Volle Datensätze der Treffer laden (fürs Bearbeiten-Formular), Anzeige in Score-Reihenfolge
-  const { data, error } = await db.from("artikel").select("*").in("mv_nr", top.map(m=>m.mv_nr));
-  if(error){ toast("Suchfehler: "+error.message, true); $("editResults").innerHTML=""; return; }
-  const byNr={}; (data||[]).forEach(a=>{ byNr[a.mv_nr]=a; });
-  const ordered=top.map(m=>byNr[m.mv_nr]).filter(Boolean);
-  if(!ordered.length){ $("editResults").innerHTML='<div class="small muted">Keine Treffer.</div>'; return; }
+  const top=matches.slice(0,200);   // Datensätze liegen komplett im Speicher (loadStamm select *)
   EDIT_HITS={};
-  $("editResults").innerHTML = ordered.map(a=>{ EDIT_HITS[a.mv_code]=a;
-    return `<div class="frow"><b style="min-width:80px">${esc(a.mv_code)}</b><span class="fn">${esc(a.bezeichnung||"")} <span class="muted">· ${esc(a.lieferant||"")}${a.mass?" · "+esc(a.mass):""}${a.art_nr_lieferant?" · "+esc(a.art_nr_lieferant):""}</span></span><button class="btn" data-edit="${esc(a.mv_code)}" style="padding:4px 12px">bearbeiten</button></div>`;
+  $("editResults").innerHTML = top.map(a=>{ EDIT_HITS[a.mv_code]=a;
+    return `<div class="frow"><b style="min-width:80px">${esc(a.mv_code)}</b><span class="fn">${esc(a.bezeichnung||"")} <span class="muted">· ${esc(a.lieferant||"")}${a.hersteller?" · "+esc(a.hersteller):""}${a.mass?" · "+esc(a.mass):""}${a.art_nr_lieferant?" · "+esc(a.art_nr_lieferant):""}</span></span><button class="btn" data-edit="${esc(a.mv_code)}" style="padding:4px 12px">bearbeiten</button></div>`;
   }).join("");
   $("editResults").querySelectorAll("button[data-edit]").forEach(b=>b.addEventListener("click",()=>loadEditForm(EDIT_HITS[b.dataset.edit])));
   if(matches.length>top.length) $("editResults").insertAdjacentHTML("beforeend", '<div class="small muted" style="padding:6px 2px">… '+(matches.length-top.length)+' weitere Treffer – Suche verfeinern.</div>');
@@ -1185,7 +1180,7 @@ $("editSaveBtn").addEventListener("click", async ()=>{
     if(error) throw error;
     // In-Memory-Stamm nachziehen, damit die Suche sofort die neuen Werte kennt
     const rr=STAMM.rows.find(r=>r.mv_nr===EDIT_CURRENT.mv_nr);
-    if(rr){ ["bezeichnung","lieferant","art_nr_lieferant","art_nr_hersteller","ek_exkl","vpe_menge","einheit"].forEach(k=>{ if(k in payload) rr[k]=payload[k]; }); }
+    if(rr) Object.assign(rr, payload);
     $("editSaveInfo").innerHTML='<span style="color:#fff;background:var(--ok);padding:3px 10px;border-radius:6px;font-weight:700">✓ Gespeichert</span>';
     editSearch();
   }catch(e){
