@@ -1104,19 +1104,55 @@ let EDIT_CURRENT = null, EDIT_HITS = {};
 
 $("editSearchBtn").addEventListener("click", editSearch);
 $("editSearch").addEventListener("keydown", e=>{ if(e.key==="Enter") editSearch(); });
+function normLoose(s){ return norm(s).replace(/[\s.\-_/]/g,""); }
+function countOcc(text, term){ if(!term) return 0; let n=0,i=0; while((i=text.indexOf(term,i))!==-1){ n++; i+=term.length; } return n; }
+/* Kontext-/Mehrwortsuche über den geladenen Stamm (wie in der Bestell-App):
+   exakte Artikelnummer zuerst; sonst muss JEDES Wort vorkommen, Treffer im Namen zählen doppelt. */
+function searchStamm(q){
+  q=(q||"").trim(); if(!q) return [];
+  const ql=normLoose(q);
+  if(ql){
+    const exact=STAMM.rows.filter(a=>
+      String(a.mv_nr)===ql || normLoose(a.mv_code)===ql ||
+      normLoose(a.art_nr_lieferant)===ql || normLoose(a.art_nr_hersteller)===ql);
+    if(exact.length) return exact;
+  }
+  const terms=q.toLowerCase().split(/\s+/).filter(t=>t.length>=2);
+  if(!terms.length) return [];
+  const scored=[];
+  for(const a of STAMM.rows){
+    const bez=(a.bezeichnung||"").toLowerCase();
+    const other=((a.lieferant||"")+" "+(a.art_nr_lieferant||"")+" "+(a.art_nr_hersteller||"")+" "+(a.mv_code||"")).toLowerCase();
+    let score=0, all=true;
+    for(const t of terms){
+      const cb=countOcc(bez,t), co=countOcc(other,t);
+      if(cb+co===0){ all=false; break; }      // Wort fehlt -> Artikel passt nicht
+      score+=cb*2+co;                          // Treffer im Namen zählen doppelt
+    }
+    if(all) scored.push({a,score});
+  }
+  scored.sort((x,y)=>y.score-x.score);         // meiste Treffer zuerst
+  return scored.map(s=>s.a);
+}
 async function editSearch(){
   const q=$("editSearch").value.trim(); if(!q){ $("editResults").innerHTML=""; return; }
-  const like="%"+q+"%";
-  const { data, error } = await db.from("artikel").select("*")
-    .or(`mv_code.ilike.${like},bezeichnung.ilike.${like},art_nr_lieferant.ilike.${like},lieferant.ilike.${like}`)
-    .order("mv_nr",{ascending:true}).limit(2000);
-  if(error){ toast("Suchfehler: "+error.message, true); return; }
-  if(!data||!data.length){ $("editResults").innerHTML='<div class="small muted">Keine Treffer.</div>'; return; }
+  if(!STAMM.loaded){ toast("Bitte zuerst den Stamm laden (oben).", true); return; }
+  const matches=searchStamm(q);
+  if(!matches.length){ $("editResults").innerHTML='<div class="small muted">Keine Treffer.</div>'; return; }
+  const top=matches.slice(0,100);
+  $("editResults").innerHTML='<div class="small muted">lädt…</div>';
+  // Volle Datensätze der Treffer laden (fürs Bearbeiten-Formular), Anzeige in Score-Reihenfolge
+  const { data, error } = await db.from("artikel").select("*").in("mv_nr", top.map(m=>m.mv_nr));
+  if(error){ toast("Suchfehler: "+error.message, true); $("editResults").innerHTML=""; return; }
+  const byNr={}; (data||[]).forEach(a=>{ byNr[a.mv_nr]=a; });
+  const ordered=top.map(m=>byNr[m.mv_nr]).filter(Boolean);
+  if(!ordered.length){ $("editResults").innerHTML='<div class="small muted">Keine Treffer.</div>'; return; }
   EDIT_HITS={};
-  $("editResults").innerHTML = data.map(a=>{ EDIT_HITS[a.mv_code]=a;
+  $("editResults").innerHTML = ordered.map(a=>{ EDIT_HITS[a.mv_code]=a;
     return `<div class="frow"><b style="min-width:80px">${esc(a.mv_code)}</b><span class="fn">${esc(a.bezeichnung||"")} <span class="muted">· ${esc(a.lieferant||"")}${a.mass?" · "+esc(a.mass):""}${a.art_nr_lieferant?" · "+esc(a.art_nr_lieferant):""}</span></span><button class="btn" data-edit="${esc(a.mv_code)}" style="padding:4px 12px">bearbeiten</button></div>`;
   }).join("");
   $("editResults").querySelectorAll("button[data-edit]").forEach(b=>b.addEventListener("click",()=>loadEditForm(EDIT_HITS[b.dataset.edit])));
+  if(matches.length>top.length) $("editResults").insertAdjacentHTML("beforeend", '<div class="small muted" style="padding:6px 2px">… '+(matches.length-top.length)+' weitere Treffer – Suche verfeinern.</div>');
 }
 function loadEditForm(a){
   EDIT_CURRENT = a;
@@ -1147,6 +1183,9 @@ $("editSaveBtn").addEventListener("click", async ()=>{
   try{
     const { error } = await db.from("artikel").update(payload).eq("id", EDIT_CURRENT.id);
     if(error) throw error;
+    // In-Memory-Stamm nachziehen, damit die Suche sofort die neuen Werte kennt
+    const rr=STAMM.rows.find(r=>r.mv_nr===EDIT_CURRENT.mv_nr);
+    if(rr){ ["bezeichnung","lieferant","art_nr_lieferant","art_nr_hersteller","ek_exkl","vpe_menge","einheit"].forEach(k=>{ if(k in payload) rr[k]=payload[k]; }); }
     $("editSaveInfo").innerHTML='<span style="color:#fff;background:var(--ok);padding:3px 10px;border-radius:6px;font-weight:700">✓ Gespeichert</span>';
     editSearch();
   }catch(e){
