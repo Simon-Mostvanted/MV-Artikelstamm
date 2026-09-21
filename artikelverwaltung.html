@@ -1370,7 +1370,7 @@ function loadEditForm(a){
 }
 $("editCancelBtn").addEventListener("click", ()=>{
   $("editFormCard").classList.add("hidden"); EDIT_CURRENT=null;
-  if(EDIT_RETURN){ EDIT_RETURN=false; $("editBackBtn").classList.add("hidden"); setMode("anlegen"); const mc=$("matchCard"); if(mc) mc.scrollIntoView({behavior:"smooth"}); }
+  if(EDIT_RETURN) returnToRechnung();
 });
 /* Stamm-Artikel aus der Neu-Hinweiszeile heraus korrigieren – ohne den Rechnungs-Stand zu verlieren */
 let EDIT_RETURN=false;
@@ -1382,10 +1382,35 @@ function openStammFix(mvNr){
   loadEditForm(a);
   const bb=$("editBackBtn"); if(bb) bb.classList.remove("hidden");
 }
-$("editBackBtn").addEventListener("click", ()=>{
+/* Namens-Konflikt anhand des AKTUELLEN Stamms neu bestimmen (berücksichtigt Umbenennungen). */
+function computeNameClash(bez, artnr){
+  const nn=normName(bez), na=norm(artnr), seen=new Set(), out=[];
+  for(const h of STAMM.rows){
+    if(normName(h.bezeichnung)===nn && norm(h.art_nr_lieferant)!==na && !seen.has(h.mv_code)){
+      seen.add(h.mv_code); out.push({mv_code:h.mv_code, mv_nr:h.mv_nr, art:h.art_nr_lieferant||""});
+    }
+  }
+  return out;
+}
+/* Hinweise der Neu-Tabelle aktualisieren; liefert die MV-Codes, deren Hinweis weggefallen ist. */
+function refreshNameClashes(){
+  const cleared=[];
+  NEWROWS.forEach(r=>{
+    const before=new Set((r.nameClash||[]).map(x=>x.mv_code));
+    r.nameClash=computeNameClash(r.bezeichnung, r.art_nr_lieferant);
+    const after=new Set(r.nameClash.map(x=>x.mv_code));
+    before.forEach(code=>{ if(!after.has(code)) cleared.push(code); });
+  });
+  return [...new Set(cleared)];
+}
+function returnToRechnung(){
   EDIT_RETURN=false; $("editBackBtn").classList.add("hidden");
-  setMode("anlegen"); const mc=$("matchCard"); if(mc) mc.scrollIntoView({behavior:"smooth"});
-});
+  const cleared=refreshNameClashes();
+  setMode("anlegen"); renderNewTable();
+  const mc=$("matchCard"); if(mc) mc.scrollIntoView({behavior:"smooth"});
+  if(cleared.length) toast("Hinweis entfernt: "+cleared.join(", ")+" ist jetzt korrekt benannt ✓");
+}
+$("editBackBtn").addEventListener("click", returnToRechnung);
 $("editSaveBtn").addEventListener("click", async ()=>{
   if(!EDIT_CURRENT) return;
   const payload={};
