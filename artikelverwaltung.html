@@ -393,7 +393,7 @@ const EXTRACT_SCHEMA = {
     sender:{type:"string",description:"Rechnungssteller/Lieferant, sonst 'k.A.'"},
     artikel:{type:"array",items:{type:"object",properties:{
       artikelNummer:{type:"string",description:"Artikel-/Bestellnummer des Lieferanten, sonst 'k.A.'"},
-      bezeichnung:{type:"string",description:"Bezeichnung des Artikels"},
+      bezeichnung:{type:"string",description:"Vollständige Artikelbezeichnung. Übernimm ALLE Beschreibungszeilen des Postens in gedruckter Reihenfolge – steht z. B. zusätzlich zum Klartext-Namen eine Kurz-/Typbezeichnung (Code mit Bindestrichen, z. B. 'SCHAB-KST-SET-2TLG'), hänge sie mit einem Leerzeichen an. Nichts weglassen."},
       preis:{type:"number",description:"Einzelpreis netto (Einkaufspreis)"},
       herstellerNummer:{type:"string",description:"Hersteller-Artikelnummer oder EAN/GTIN, NUR wenn eindeutig vorhanden, sonst ''"},
       hersteller:{type:"string",description:"Herstellername/Marke, NUR wenn eindeutig vorhanden, sonst ''"},
@@ -407,7 +407,8 @@ const EXTRACT_SCHEMA = {
 async function extractInvoice(base64, apiKey){
   const promptText = `Extrahiere alle echten Artikel/Waren-Posten aus dieser Rechnung.
 IGNORIERE Versandkosten, Porto, Fracht, Verpackung, Bearbeitungs-/Servicegebühren, Pauschalen, Rabatte, Skonto, Gutschriften und negative Beträge – das sind KEINE Artikel.
-Nutze für jeden Posten: artikelNummer (Lieferantennummer, sonst 'k.A.'), bezeichnung, preis (Einzelpreis netto). Falls eindeutig erkennbar zusätzlich herstellerNummer/EAN, hersteller, mass, farbe – sonst leeren String.`;
+Nutze für jeden Posten: artikelNummer (Lieferantennummer, sonst 'k.A.'), bezeichnung, preis (Einzelpreis netto). Falls eindeutig erkennbar zusätzlich herstellerNummer/EAN, hersteller, mass, farbe – sonst leeren String.
+WICHTIG zur bezeichnung: Übernimm den KOMPLETTEN Artikeltext. Viele Rechnungen (z. B. Würth) haben pro Posten MEHRERE Beschreibungszeilen – einen Klartext-Namen UND zusätzlich eine Kurz-/Typbezeichnung (oft ein Code mit Bindestrichen, z. B. 'SCHAB-KST-SET-2TLG'). Übernimm dann BEIDE in das eine Feld bezeichnung (Klartext zuerst, dann der Code), getrennt durch ein Leerzeichen. Lass keine Zeile weg.`;
   const system = `Du bist ein hochpräziser Assistent für Rechnungsdaten-Extraktion. Extrahiere ausschließlich echte Waren/Kern-Dienstleistungen; niemals Gebühren, Pauschalen, Rabatte oder Gutschriften. Antworte ausschließlich mit dem geforderten JSON.`;
   const body = { model:CLAUDE_MODEL, max_tokens:32000, system,
     messages:[{role:"user",content:[
