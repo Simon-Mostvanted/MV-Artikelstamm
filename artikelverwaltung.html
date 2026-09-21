@@ -613,7 +613,9 @@ function makeMatched(c, hit){
   if(invRaw==null) ekStatus="noinv";
   else if(stEk==null) ekStatus="missing";
   else if(Math.abs(stEk-chosen)>0.005) ekStatus="diff";
-  return { c, mv_code:hit.mv_code, mv_nr:hit.mv_nr, stEk, invRaw, vpe, einheit, perVPE, perUnit, basis, ekStatus };
+  const stBez = hit.bezeichnung||"";
+  const bezDiff = !!(c.bezeichnung && stBez && normName(c.bezeichnung)!==normName(stBez));
+  return { c, mv_code:hit.mv_code, mv_nr:hit.mv_nr, stEk, invRaw, vpe, einheit, perVPE, perUnit, basis, ekStatus, stBez, bezDiff };
 }
 /* Neuen (editierbaren) Artikel aus Kandidat bauen. Bestellweg wird NIE automatisch gefüllt;
    nur etikett_typ='kein' bleibt bei Würth automatisch (Würth etikettiert selbst). */
@@ -650,6 +652,14 @@ function nameHitsFor(nn){
   }
   return out;
 }
+/* Namens-Treffer, aber die Art.nr hat Vorrang: Hat die Rechnung eine Lieferanten-Art.nr,
+   zählen nur Treffer, deren Art.nr fehlt oder identisch ist. Vorhandene, ABWEICHENDE Art.nr
+   bedeutet "anderer Artikel" -> keine mögliche Dublette (z. B. gleichnamige Würth-Bits). */
+function nameDupHits(nn, na){
+  const hits = nameHitsFor(nn);
+  if(!na) return hits;
+  return hits.filter(h => { const hn = norm(h.art_nr_lieferant); return !hn || hn===na; });
+}
 function runMatch(){
   if(!STAMM.loaded){ toast("Bitte zuerst den Stamm laden (oben).", true); return; }
   NEWROWS=[]; SKIPPED=[]; MATCHED=[]; REVIEW=[];
@@ -671,7 +681,7 @@ function runMatch(){
     if(kh && kh!=="-" && STAMM.keyHerst.has(kh)){ SKIPPED.push({c,grund:"schon im Stamm (Art.nr.Hersteller)"}); continue; }
     // 3) Namens-Treffer (exakt ODER enthalten, z. B. Rechnung mit Zusatztext) -> zum Prüfen
     const nn = normName(c.bezeichnung);
-    const nameHits = nameHitsFor(nn);
+    const nameHits = nameDupHits(nn, na);
     if(nameHits.length){ REVIEW.push(makeReview(c, nameHits, "name")); continue; }
     // 4) Dublette innerhalb dieser Auswahl?
     const bkey = na ? (tl+"|"+na) : (tl+"##"+norm(c.bezeichnung));
@@ -693,11 +703,11 @@ function renderMatched(){
   if(!box) return;
   // Im Eingang nur EK-Abweichungen zeigen; "passt bereits" ausblenden. Original-Index für den EK-Knopf behalten.
   const entries = MATCHED.map((m,i)=>({m,i}))
-    .filter(e => !HIDE_OK_MATCHED || e.m.ekStatus==="diff" || e.m.ekStatus==="missing");
+    .filter(e => !HIDE_OK_MATCHED || e.m.ekStatus==="diff" || e.m.ekStatus==="missing" || e.m.bezDiff);
   if(!entries.length){ box.classList.add("hidden"); list.innerHTML=""; return; }
   box.classList.remove("hidden");
   list.innerHTML = entries.map(({m,i})=>{
-    let ekLine, buttons="<span class='small muted'>—</span>";
+    let ekLine, buttons="";
     if(m.ekStatus==="noinv"){
       ekLine="<span class='muted'>EK im Stamm: "+fmtEk(m.stEk)+" · keine Rechnungs-EK erkannt</span>";
     } else if(m.ekStatus==="same"){
@@ -717,13 +727,31 @@ function renderMatched(){
         buttons="<button class='btn' data-ek='"+i+"' data-basis='einheit' style='padding:4px 12px' title='Speichert den EK pro "+eh+"'>EK auf <b>"+fmtEk(m.perUnit)+"</b>/"+eh+" setzen</button>";
       }
     }
+    const bezInfo = m.bezDiff ? "<br><span class='small' style='color:var(--warn)'>Stamm-Bezeichnung: "+esc(m.stBez)+" <span class='muted'>(weicht ab)</span></span>" : "";
+    const bezBtn  = m.bezDiff ? "<button class='btn ghost' data-bez='"+i+"' style='padding:4px 10px' title='Bezeichnung im Stamm auf die Rechnung ändern'>Stamm-Bezeichnung → Rechnung</button>" : "";
+    const btnArea = (buttons||bezBtn) ? (buttons+(buttons&&bezBtn?" ":"")+bezBtn) : "<span class='small muted'>—</span>";
     return "<div class='frow' style='align-items:center;flex-wrap:wrap;gap:6px'>"+
       "<b style='min-width:80px'>"+esc(m.mv_code)+"</b>"+
-      "<span class='fn'>"+esc(m.c.bezeichnung||"")+"<br><span class='small'>"+ekLine+"</span></span>"+
-      buttons+
+      "<span class='fn'>"+esc(m.c.bezeichnung||"")+"<br><span class='small'>"+ekLine+"</span>"+bezInfo+"</span>"+
+      btnArea+
       "</div>";
   }).join("");
   list.querySelectorAll("button[data-ek]").forEach(b=>b.addEventListener("click",()=>updateEk(+b.dataset.ek, b.dataset.basis)));
+  list.querySelectorAll("button[data-bez]").forEach(b=>b.addEventListener("click",()=>updateMatchedBez(+b.dataset.bez)));
+}
+async function updateMatchedBez(i){
+  const m=MATCHED[i]; if(!m) return;
+  const val=clean(m.c.bezeichnung);
+  if(!val){ toast("Keine Rechnungs-Bezeichnung vorhanden.", true); return; }
+  if(!confirm("Bezeichnung von "+m.mv_code+" im Stamm ändern auf:\n\""+val+"\" ?")) return;
+  try{
+    const { error } = await db.from("artikel").update({bezeichnung:val}).eq("mv_nr", m.mv_nr);
+    if(error) throw error;
+    updateStammField(m.mv_nr, "bezeichnung", val);
+    m.stBez=val; m.bezDiff=false;
+    renderMatched();
+    toast("Stamm-Bezeichnung aktualisiert: "+m.mv_code);
+  }catch(e){ toast("Update fehlgeschlagen: "+(e.message||e), true); }
 }
 async function updateEk(i, basis){
   const m=MATCHED[i]; if(!m || m.invRaw==null) return;
@@ -765,6 +793,10 @@ function renderReview(){
       const stEk = h.ek_exkl!=null ? Number(h.ek_exkl) : null;
       const liefDiff = normLief(h.lieferant) !== normLief(c.lieferant);
       const bezDiff  = normName(h.bezeichnung) !== normName(c.bezeichnung);
+      const invNa=norm(c.art_nr_lieferant), hitNa=norm(h.art_nr_lieferant);
+      const artNrCue = !hitNa ? " <span class='muted'>(keine Nr. im Stamm)</span>"
+        : (invNa && hitNa===invNa ? " <span style='color:var(--ok)'>✓ gleiche Nr.</span>"
+        : (invNa ? " <span style='color:var(--warn)'>(andere Nr. als Rechnung)</span>" : ""));
       let ekLine;
       if(invEk==null) ekLine="<span class='muted'>Stamm-EK "+fmtEk(stEk)+" · keine Rechnungs-EK erkannt</span>";
       else if(stEk==null) ekLine="<span style='color:var(--warn)'>Stamm ohne EK · Rechnung <b>"+fmtEk(invEk)+"</b></span>";
@@ -775,6 +807,7 @@ function renderReview(){
       if(bezDiff)  btns += " <button class='btn ghost' data-sbez='"+i+"_"+j+"' style='padding:4px 10px' title='Bezeichnung im Stamm auf die Rechnung ändern'>Stamm-Bezeichnung → Rechnung</button>";
       return "<div style='border-top:1px dashed var(--line);padding-top:6px;margin-top:6px'>"+
         "<div><b>"+esc(h.mv_code)+"</b> · "+esc(h.bezeichnung||"")+"</div>"+
+        "<div class='small'>Stamm-Art.nr.: "+esc(h.art_nr_lieferant||"—")+artNrCue+"</div>"+
         "<div class='small'>Stamm-Lieferant: "+esc(h.lieferant||"?")+(liefDiff?" <span style='color:var(--warn)'>(weicht ab)</span>":"")+"</div>"+
         "<div class='small' style='margin:3px 0'>"+ekLine+"</div>"+
         "<div style='display:flex;flex-wrap:wrap;gap:6px'>"+btns+"</div>"+
@@ -1139,7 +1172,7 @@ function classifyEingang(row){
     }
     if(kh && kh!=="-" && STAMM.keyHerst.has(kh)) continue;
     const nn=normName(c.bezeichnung);
-    if(nameHitsFor(nn).length){ pruefen++; continue; }
+    if(nameDupHits(nn, na).length){ pruefen++; continue; }
     neu++;
   }
   return {neu, pruefen, ekAbw, total:cands.length, actionable:neu+pruefen+ekAbw};
