@@ -654,6 +654,16 @@ function nameHitsFor(nn){
   }
   return out;
 }
+/* Namens-Treffer für die Dubletten-Prüfung, ABER Art.nr hat Vorrang:
+   Hat die Rechnung eine Lieferanten-Art.nr, zählen nur Treffer, deren Art.nr fehlt oder identisch ist.
+   Ein Treffer mit vorhandener, ABWEICHENDER Art.nr ist ein anderer Artikel -> kein Dublett.
+   WICHTIG: betrifft nur reine Namens-Treffer. Gleiche Art.nr (EK-/Lieferant-/Bezeichnungs-Prüfung)
+   läuft über Schritt 1 und ist davon NICHT betroffen. */
+function nameDupHits(nn, na){
+  const hits = nameHitsFor(nn);
+  if(!na) return hits;                       // Rechnung ohne Art.nr -> Name entscheidet (wie bisher)
+  return hits.filter(h => { const hn = norm(h.art_nr_lieferant); return !hn || hn===na; });
+}
 function runMatch(){
   if(!STAMM.loaded){ toast("Bitte zuerst den Stamm laden (oben).", true); return; }
   NEWROWS=[]; SKIPPED=[]; MATCHED=[]; REVIEW=[];
@@ -675,7 +685,7 @@ function runMatch(){
     if(kh && kh!=="-" && STAMM.keyHerst.has(kh)){ SKIPPED.push({c,grund:"schon im Stamm (Art.nr.Hersteller)"}); continue; }
     // 3) Namens-Treffer (exakt ODER enthalten, z. B. Rechnung mit Zusatztext) -> zum Prüfen
     const nn = normName(c.bezeichnung);
-    const nameHits = nameHitsFor(nn);
+    const nameHits = nameDupHits(nn, na);
     if(nameHits.length){ REVIEW.push(makeReview(c, nameHits, "name")); continue; }
     // 4) Dublette innerhalb dieser Auswahl?
     const bkey = na ? (tl+"|"+na) : (tl+"##"+norm(c.bezeichnung));
@@ -1166,7 +1176,7 @@ function classifyEingang(row){
     }
     if(kh && kh!=="-" && STAMM.keyHerst.has(kh)) continue;
     const nn=normName(c.bezeichnung);
-    if(nameHitsFor(nn).length){ pruefen++; continue; }
+    if(nameDupHits(nn, na).length){ pruefen++; continue; }
     neu++;
   }
   return {neu, pruefen, ekAbw, total:cands.length, actionable:neu+pruefen+ekAbw};

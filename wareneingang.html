@@ -436,8 +436,11 @@ function classify(it){
   if(okArt) return {status:"ok",art:okArt,note: okArt._src==="test"?"in der Test-Tabelle":""};
   if(eanArt) return {status:"ok",art:eanArt,note:"über Hersteller-/EAN-Nr. erkannt"};
   if(pruefArt) return {status:"pruef",art:pruefArt,note:pruefNote};
-  // Namens-Treffer (exakt ODER enthalten) -> prüfen statt neu (z. B. Lieferant ohne Art.nr. / Zusatztext)
-  const nameHits = nameHitsFor(normName(it.bezeichnung));
+  // Namens-Treffer (exakt ODER enthalten) -> prüfen statt neu. Art.nr hat Vorrang: hat die Rechnung
+  // Nummern (die oben NICHT im Stamm gefunden wurden), zählen nur namensgleiche Stamm-Artikel OHNE
+  // eigene Art.nr. Ein Treffer mit abweichender Art.nr ist ein anderer Artikel -> kein Dublett.
+  const nHits = nameHitsFor(normName(it.bezeichnung));
+  const nameHits = cands.length ? nHits.filter(h=>!norm(h.art_nr_lieferant)) : nHits;
   if(nameHits.length) return {status:"pruef",art:nameHits[0],note:"über Bezeichnung erkannt: "+nameHits.slice(0,3).map(h=>h.mv_code).join(", ")};
   return {status:"neu",art:null,note: cands.length?"":"keine Nummer erkannt"};
 }
