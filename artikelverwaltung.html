@@ -730,10 +730,10 @@ function renderMatched(){
     const bezInfo = m.bezDiff ? "<br><span class='small' style='color:var(--warn)'>Stamm-Bezeichnung: "+esc(m.stBez)+" <span class='muted'>(weicht ab)</span></span>" : "";
     const bezBtn  = m.bezDiff ? "<button class='btn ghost' data-bez='"+i+"' style='padding:4px 10px' title='Bezeichnung im Stamm auf die Rechnung ändern'>Stamm-Bezeichnung → Rechnung</button>" : "";
     const btnArea = (buttons||bezBtn) ? (buttons+(buttons&&bezBtn?" ":"")+bezBtn) : "<span class='small muted'>—</span>";
-    return "<div class='frow' style='align-items:center;flex-wrap:wrap;gap:6px'>"+
+    return "<div class='frow' style='align-items:flex-start;gap:8px'>"+
       "<b style='min-width:80px'>"+esc(m.mv_code)+"</b>"+
-      "<span class='fn'>"+esc(m.c.bezeichnung||"")+"<br><span class='small'>"+ekLine+"</span>"+bezInfo+"</span>"+
-      btnArea+
+      "<span class='fn' style='min-width:0'>"+esc(m.c.bezeichnung||"")+"<br><span class='small'>"+ekLine+"</span>"+bezInfo+"</span>"+
+      "<div style='display:flex;flex-direction:column;align-items:stretch;gap:6px;flex:0 0 auto;max-width:320px'>"+btnArea+"</div>"+
       "</div>";
   }).join("");
   list.querySelectorAll("button[data-ek]").forEach(b=>b.addEventListener("click",()=>updateEk(+b.dataset.ek, b.dataset.basis)));
