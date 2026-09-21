@@ -43,7 +43,9 @@
   .pill.neu{background:rgba(34,197,94,.15);color:#4ade80}
   .pill.dup{background:rgba(245,158,11,.15);color:#fbbf24}
   .pill.bad{background:rgba(239,68,68,.15);color:#f87171}
-  .tablewrap{overflow-x:auto;border:1px solid var(--line);border-radius:8px}
+  .tablewrap{overflow:auto;border:1px solid var(--line);border-radius:8px}
+  /* Lange Auflistungen begrenzen: ~10 Zeilen sichtbar, Rest per Scrollbar */
+  #matchedList,#reviewList,#eingangList{max-height:480px;overflow-y:auto}
   table{border-collapse:collapse;width:100%;font-size:12.5px;white-space:nowrap}
   th,td{border-bottom:1px solid var(--line);padding:6px 8px;text-align:left;vertical-align:middle}
   th{background:var(--panel2);color:var(--muted);font-weight:600;position:sticky;top:0}
@@ -227,7 +229,7 @@
         </div>
       </div>
     </div>
-    <div class="tablewrap"><table id="newTable"></table></div>
+    <div class="tablewrap" style="max-height:460px"><table id="newTable"></table></div>
     <details id="dupDetails"><summary>Übersprungene (Dubletten / ungültig) anzeigen</summary><div id="dupList" class="small" style="margin-top:8px"></div></details>
   </div>
 
@@ -621,6 +623,11 @@ function makeMatched(c, hit){
    nur etikett_typ='kein' bleibt bei Würth automatisch (Würth etikettiert selbst). */
 function makeNewRow(c){
   const w=isWuerth(c.lieferant);
+  // Sicherheitscheck gegen den Stamm: zuerst Lieferanten-Art.nr, dann Bezeichnung.
+  const na=norm(c.art_nr_lieferant);
+  const artHits = na && STAMM.byArtNr.has(na) ? STAMM.byArtNr.get(na) : [];
+  const nameHits = nameHitsFor(normName(c.bezeichnung));
+  const codes = arr => [...new Set(arr.map(h=>h.mv_code))].slice(0,5).join(", ");
   return {
     bezeichnung:c.bezeichnung, lieferant:c.lieferant,
     art_nr_lieferant:c.art_nr_lieferant, art_nr_hersteller:c.art_nr_hersteller,
@@ -628,7 +635,9 @@ function makeNewRow(c){
     mass:c.mass, farbe:c.farbe, vpe:c.vpe||"",
     ek_exkl:c.ek_exkl, vk_inkl:(c.vk_inkl!=null?c.vk_inkl:null),
     bestell_mail:c.bestell_mail||"", produktlink:c.produktlink||"",
-    bestellweg:(c.bestellweg||""), etikett_typ: w?"kein":""
+    bestellweg:(c.bestellweg||""), etikett_typ: w?"kein":"",
+    warnDup: artHits.length ? codes(artHits) : "",
+    warnName: nameHits.length ? codes(nameHits) : ""
   };
 }
 /* Mögliche Dublette: Kandidat + Stamm-Treffer (auf eindeutige MV-Codes reduziert) */
@@ -1044,7 +1053,7 @@ async function loadListen(){
         "<input id='add_"+kat+"' type='text' placeholder='Neuer Wert…' style='max-width:280px'>"+
         "<button class='btn ok' data-add='"+kat+"' style='padding:4px 12px'>＋ Hinzufügen</button>"+
       "</div>"+
-      "<div>"+(rows||"<div class='small muted'>Noch keine Werte.</div>")+"</div>"+
+      "<div style='max-height:420px;overflow-y:auto'>"+(rows||"<div class='small muted'>Noch keine Werte.</div>")+"</div>"+
     "</div>";
   }).join("");
   box.querySelectorAll("button[data-add]").forEach(b=>b.addEventListener("click",()=>listenAdd(b.dataset.add)));
