@@ -623,11 +623,6 @@ function makeMatched(c, hit){
    nur etikett_typ='kein' bleibt bei Würth automatisch (Würth etikettiert selbst). */
 function makeNewRow(c){
   const w=isWuerth(c.lieferant);
-  // Sicherheitscheck gegen den Stamm: zuerst Lieferanten-Art.nr, dann Bezeichnung.
-  const na=norm(c.art_nr_lieferant);
-  const artHits = na && STAMM.byArtNr.has(na) ? STAMM.byArtNr.get(na) : [];
-  const nameHits = nameHitsFor(normName(c.bezeichnung));
-  const codes = arr => [...new Set(arr.map(h=>h.mv_code))].slice(0,5).join(", ");
   return {
     bezeichnung:c.bezeichnung, lieferant:c.lieferant,
     art_nr_lieferant:c.art_nr_lieferant, art_nr_hersteller:c.art_nr_hersteller,
@@ -635,9 +630,7 @@ function makeNewRow(c){
     mass:c.mass, farbe:c.farbe, vpe:c.vpe||"",
     ek_exkl:c.ek_exkl, vk_inkl:(c.vk_inkl!=null?c.vk_inkl:null),
     bestell_mail:c.bestell_mail||"", produktlink:c.produktlink||"",
-    bestellweg:(c.bestellweg||""), etikett_typ: w?"kein":"",
-    warnDup: artHits.length ? codes(artHits) : "",
-    warnName: nameHits.length ? codes(nameHits) : ""
+    bestellweg:(c.bestellweg||""), etikett_typ: w?"kein":""
   };
 }
 /* Mögliche Dublette: Kandidat + Stamm-Treffer (auf eindeutige MV-Codes reduziert) */
@@ -661,14 +654,6 @@ function nameHitsFor(nn){
   }
   return out;
 }
-/* Namens-Treffer, aber die Art.nr hat Vorrang: Hat die Rechnung eine Lieferanten-Art.nr,
-   zählen nur Treffer, deren Art.nr fehlt oder identisch ist. Vorhandene, ABWEICHENDE Art.nr
-   bedeutet "anderer Artikel" -> keine mögliche Dublette (z. B. gleichnamige Würth-Bits). */
-function nameDupHits(nn, na){
-  const hits = nameHitsFor(nn);
-  if(!na) return hits;
-  return hits.filter(h => { const hn = norm(h.art_nr_lieferant); return !hn || hn===na; });
-}
 function runMatch(){
   if(!STAMM.loaded){ toast("Bitte zuerst den Stamm laden (oben).", true); return; }
   NEWROWS=[]; SKIPPED=[]; MATCHED=[]; REVIEW=[];
@@ -690,7 +675,7 @@ function runMatch(){
     if(kh && kh!=="-" && STAMM.keyHerst.has(kh)){ SKIPPED.push({c,grund:"schon im Stamm (Art.nr.Hersteller)"}); continue; }
     // 3) Namens-Treffer (exakt ODER enthalten, z. B. Rechnung mit Zusatztext) -> zum Prüfen
     const nn = normName(c.bezeichnung);
-    const nameHits = nameDupHits(nn, na);
+    const nameHits = nameHitsFor(nn);
     if(nameHits.length){ REVIEW.push(makeReview(c, nameHits, "name")); continue; }
     // 4) Dublette innerhalb dieser Auswahl?
     const bkey = na ? (tl+"|"+na) : (tl+"##"+norm(c.bezeichnung));
@@ -1181,7 +1166,7 @@ function classifyEingang(row){
     }
     if(kh && kh!=="-" && STAMM.keyHerst.has(kh)) continue;
     const nn=normName(c.bezeichnung);
-    if(nameDupHits(nn, na).length){ pruefen++; continue; }
+    if(nameHitsFor(nn).length){ pruefen++; continue; }
     neu++;
   }
   return {neu, pruefen, ekAbw, total:cands.length, actionable:neu+pruefen+ekAbw};
