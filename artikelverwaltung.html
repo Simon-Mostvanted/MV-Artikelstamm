@@ -266,6 +266,7 @@
       <div class="sub">Die MV-Nummer ist fest. Alle anderen Felder kannst du ändern (auch leere Felder füllen).</div>
       <div id="editFields" style="display:grid;grid-template-columns:1fr 1fr;gap:10px"></div>
       <div class="row" style="margin-top:14px">
+        <button class="btn hidden" id="editBackBtn" type="button" title="Zurück zur Rechnungsbearbeitung, ohne den Stand zu verlieren">← Zurück zur Rechnung</button>
         <button class="btn ok" id="editSaveBtn" type="button">✓ Änderungen speichern</button>
         <button class="btn ghost" id="editCancelBtn" type="button">Abbrechen</button>
         <span id="editSaveInfo" class="small muted"></span>
@@ -623,6 +624,14 @@ function makeMatched(c, hit){
    nur etikett_typ='kein' bleibt bei Würth automatisch (Würth etikettiert selbst). */
 function makeNewRow(c){
   const w=isWuerth(c.lieferant);
+  // Namens-Konflikt: existiert die exakt gleiche Bezeichnung schon im Stamm (mit anderer Art.nr)?
+  // Dann ist DIES ein eigener Artikel (Art.nr = Wahrheit) und der Stamm-Artikel evtl. falsch benannt.
+  const nn=normName(c.bezeichnung), na=norm(c.art_nr_lieferant);
+  const clash = (STAMM.byName.has(nn) ? STAMM.byName.get(nn) : [])
+    .filter(h => norm(h.art_nr_lieferant)!==na)
+    .map(h => ({mv_code:h.mv_code, mv_nr:h.mv_nr, art:h.art_nr_lieferant||""}));
+  const seen=new Set(), nameClash=[];
+  for(const x of clash){ if(!seen.has(x.mv_code)){ seen.add(x.mv_code); nameClash.push(x); } }
   return {
     bezeichnung:c.bezeichnung, lieferant:c.lieferant,
     art_nr_lieferant:c.art_nr_lieferant, art_nr_hersteller:c.art_nr_hersteller,
@@ -630,7 +639,8 @@ function makeNewRow(c){
     mass:c.mass, farbe:c.farbe, vpe:c.vpe||"",
     ek_exkl:c.ek_exkl, vk_inkl:(c.vk_inkl!=null?c.vk_inkl:null),
     bestell_mail:c.bestell_mail||"", produktlink:c.produktlink||"",
-    bestellweg:(c.bestellweg||""), etikett_typ: w?"kein":""
+    bestellweg:(c.bestellweg||""), etikett_typ: w?"kein":"",
+    nameClash
   };
 }
 /* Mögliche Dublette: Kandidat + Stamm-Treffer (auf eindeutige MV-Codes reduziert) */
@@ -896,12 +906,10 @@ function renderNewTable(){
   for(const [,label] of COLS) html+="<th>"+label+"</th>";
   html+="<th>Etikett-Typ</th><th></th></tr></thead><tbody>";
   NEWROWS.forEach((r,i)=>{
-    const warn = r.warnDup || r.warnName;
-    const tips=[];
-    if(r.warnDup) tips.push("Gleiche Art.nr.Lieferant existiert: "+r.warnDup);
-    if(r.warnName) tips.push("Ähnliche Bezeichnung schon im Stamm: "+r.warnName);
-    const wIcon = warn ? " <span style='color:var(--warn);cursor:help' title=\""+tips.join(" | ").replace(/"/g,"&quot;")+"\">⚠</span>" : "";
-    html+="<tr"+(warn?" style=\"background:rgba(245,158,11,.10)\"":"")+"><td class='muted'>"+(i+1)+wIcon+"</td>";
+    const clash = r.nameClash||[];
+    const hasClash = clash.length>0;
+    const iIcon = hasClash ? " <span style='color:var(--warn);cursor:help' title='Gleiche Bezeichnung existiert bereits im Stamm (andere Art.nr)'>ℹ</span>" : "";
+    html+="<tr"+(hasClash?" style=\"background:rgba(245,158,11,.10)\"":"")+"><td class='muted'>"+(i+1)+iIcon+"</td>";
     for(const [field,,w] of COLS){
       const val = r[field]==null?"":r[field];
       if(field==="warengruppe"||field==="lagerort"||field==="lagerplatz"){
@@ -914,8 +922,16 @@ function renderNewTable(){
       ["","Regal","Artikel","kein"].map(o=>"<option "+(r.etikett_typ===o?"selected":"")+" value='"+o+"'>"+(o||"—")+"</option>").join("")+
       "</select></td>";
     html+="<td><button class='btn ghost' data-rm='"+i+"' title='Zeile entfernen' style='padding:4px 9px'>✕</button></td></tr>";
+    if(hasClash){
+      const chips = clash.map(x=>"<b>"+esc(x.mv_code)+"</b> <span class='muted'>Art.nr "+esc(x.art||"—")+"</span> <button class='btn ghost' data-fixmv='"+x.mv_nr+"' style='padding:2px 8px'>✎ korrigieren</button>").join(" &nbsp;·&nbsp; ");
+      html+="<tr><td></td><td colspan='"+(COLS.length+2)+"' style='background:rgba(245,158,11,.08);white-space:normal'>"+
+        "<span style='color:var(--warn)'>ℹ Gleiche Bezeichnung im Stamm, aber andere Art.nr:</span> "+chips+
+        "<div class='small muted' style='margin-top:3px'>Da die Lieferanten-Art.nr maßgeblich ist, wird dies als <b>eigener</b> Artikel angelegt. Prüfe, ob der Stamm-Artikel oben evtl. falsch benannt ist.</div>"+
+      "</td></tr>";
+    }
   });
   html+="</tbody>"; t.innerHTML=html;
+  t.querySelectorAll("button[data-fixmv]").forEach(b=>b.addEventListener("click",()=>openStammFix(+b.dataset.fixmv)));
   t.querySelectorAll("input,select:not([data-listkat])").forEach(el=>{
     el.addEventListener("change", ()=>{ const i=+el.dataset.i, f=el.dataset.f; let v=el.value;
       if(f==="ek_exkl"||f==="vk_inkl") v=parseNum(v);
@@ -1004,6 +1020,7 @@ function setMode(mode){
   $("tabBaugruppen").className  = "btn"+(mode==="baugruppen"?"":" ghost");
   $("tabListen").className      = "btn"+(mode==="listen"?"":" ghost");
   const eb=$("eingangBar"); if(eb) eb.classList.toggle("hidden", !(mode==="anlegen" && EINGANG_CURRENT));
+  const bb=$("editBackBtn"); if(bb && mode!=="bearbeiten") bb.classList.add("hidden");
 }
 $("tabEingang").addEventListener("click", ()=>{ setMode("eingang"); loadEingang(); });
 $("tabAnlegen").addEventListener("click", ()=>{ EINGANG_CURRENT=null; HIDE_OK_MATCHED=false; setMode("anlegen"); });
@@ -1351,7 +1368,24 @@ function loadEditForm(a){
   $("editFormCard").classList.remove("hidden");
   $("editFormCard").scrollIntoView({behavior:"smooth"});
 }
-$("editCancelBtn").addEventListener("click", ()=>{ $("editFormCard").classList.add("hidden"); EDIT_CURRENT=null; });
+$("editCancelBtn").addEventListener("click", ()=>{
+  $("editFormCard").classList.add("hidden"); EDIT_CURRENT=null;
+  if(EDIT_RETURN){ EDIT_RETURN=false; $("editBackBtn").classList.add("hidden"); setMode("anlegen"); const mc=$("matchCard"); if(mc) mc.scrollIntoView({behavior:"smooth"}); }
+});
+/* Stamm-Artikel aus der Neu-Hinweiszeile heraus korrigieren – ohne den Rechnungs-Stand zu verlieren */
+let EDIT_RETURN=false;
+function openStammFix(mvNr){
+  const a=STAMM.rows.find(r=>r.mv_nr===mvNr);
+  if(!a){ toast("Artikel nicht im geladenen Stamm gefunden – bitte oben neu laden.", true); return; }
+  EDIT_RETURN=true;
+  setMode("bearbeiten");
+  loadEditForm(a);
+  const bb=$("editBackBtn"); if(bb) bb.classList.remove("hidden");
+}
+$("editBackBtn").addEventListener("click", ()=>{
+  EDIT_RETURN=false; $("editBackBtn").classList.add("hidden");
+  setMode("anlegen"); const mc=$("matchCard"); if(mc) mc.scrollIntoView({behavior:"smooth"});
+});
 $("editSaveBtn").addEventListener("click", async ()=>{
   if(!EDIT_CURRENT) return;
   const payload={};
