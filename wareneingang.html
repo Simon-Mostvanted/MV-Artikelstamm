@@ -554,6 +554,16 @@ function posInner(r,i){
   let html='<div class="top"><div class="bez">'+esc(clean(r.it.bezeichnung))+'</div>'+badge+'</div>'+
     (meta.length?'<div class="meta">'+meta.join(" · ")+'</div>':'');
 
+  // Verwendung (Dropdown) + Kommission (frei) pro Position
+  html+='<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">'+
+    '<div style="flex:1;min-width:150px"><label style="font-size:11px;color:var(--muted)">Verwendung</label>'+
+      '<select data-vf="'+i+'" style="width:100%">'+
+        ["","Arbeitsschutz","Verbrauchsmaterial","Werkzeug"].map(o=>'<option value="'+o+'"'+((r.verwendung||"")===o?" selected":"")+'>'+(o||"—")+'</option>').join("")+
+      '</select></div>'+
+    '<div style="flex:1;min-width:150px"><label style="font-size:11px;color:var(--muted)">Kommission</label>'+
+      '<input type="text" data-kf="'+i+'" value="'+esc(r.kommission||"")+'" placeholder="optional" style="width:100%"></div>'+
+  '</div>';
+
 
   // Stamm-Korrektur nur für "prüfen" (Lieferantenname), PIN-geschützt
   if(r.status==="pruef" && r.art){
@@ -656,6 +666,14 @@ function ensurePin(){
   toast("Falsche PIN.",true); return false;
 }
 
+/* ---- Verwendung/Kommission pro Position ins Modell übernehmen ---- */
+$("positions").addEventListener("change",(e)=>{
+  const v=e.target.closest("[data-vf]"); if(v){ const i=+v.dataset.vf; if(ROWS[i]) ROWS[i].verwendung=v.value; return; }
+  const k=e.target.closest("[data-kf]"); if(k){ const i=+k.dataset.kf; if(ROWS[i]) ROWS[i].kommission=k.value; return; }
+});
+$("positions").addEventListener("input",(e)=>{
+  const k=e.target.closest("[data-kf]"); if(k){ const i=+k.dataset.kf; if(ROWS[i]) ROWS[i].kommission=k.value; }
+});
 /* ---- Klicks in der Positionsliste (Stamm-Korrektur, Etikett, Bestellungen) ---- */
 $("positions").addEventListener("click",(e)=>{
   const st=e.target.closest(".stammToggle");
@@ -911,6 +929,8 @@ async function saveWareneingang(){
     nummern:bestNums(r.it).join(", ")||null,
     menge:clean(r.it.menge)||null,
     status:r.status,
+    verwendung:r.verwendung||null,
+    kommission:(r.kommission&&r.kommission.trim())?r.kommission.trim():(common.kommission||null),
     abgeglichen:(r.status==="ok"||r.status==="angelegt")
   }));
   if(!rows.length){  // nur ein Scan ohne erkannte Positionen → eine Kopfzeile, damit der Scan referenziert bleibt
