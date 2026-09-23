@@ -1009,6 +1009,8 @@ async function loadListenData(){
     if(error) throw error;
     LISTEN={warengruppe:[],lagerort:[],lagerplatz:[]};
     (data||[]).forEach(r=>{ (LISTEN[r.kategorie]=LISTEN[r.kategorie]||[]).push(r); });
+    // Alle Listen alphabetisch (natürlich) sortieren
+    ["warengruppe","lagerort","lagerplatz"].forEach(k=>{ if(LISTEN[k]) LISTEN[k].sort((a,b)=>String(a.wert).localeCompare(String(b.wert),"de",{sensitivity:"base",numeric:true})); });
   }catch(e){ /* Liste optional */ }
   fillArchPlatz();
 }
