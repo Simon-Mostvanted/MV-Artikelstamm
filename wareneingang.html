@@ -138,7 +138,6 @@
       <div class="grid2">
         <div><label>Lieferant (für die Ablage)</label><input id="archLief" type="text" placeholder="Lieferant"></div>
         <div><label>Lieferschein-Nr.</label><input id="archLsnr" type="text" placeholder="falls vorhanden"></div>
-        <div><label>Lagerplatz</label><select id="archPlatz"></select></div>
         <div><label>Kommission</label><input id="archKomm" type="text" placeholder="optional"></div>
       </div>
       <label style="margin-top:8px">Notiz</label>
@@ -555,31 +554,6 @@ function posInner(r,i){
   let html='<div class="top"><div class="bez">'+esc(clean(r.it.bezeichnung))+'</div>'+badge+'</div>'+
     (meta.length?'<div class="meta">'+meta.join(" · ")+'</div>':'');
 
-  // Anlegen nur für "neu"
-  if(r.status==="neu"){
-    if(!TEST_TABLE_OK){
-      html+='<div class="posActions"><span class="small muted">Anlegen erst nach Anlegen der Test-Tabelle möglich.</span></div>';
-    }else{
-      const nums=bestNums(r.it);
-      const artLief=nums[0]||"";
-      const artHerst=nums[1]||"";
-      html+='<div class="posActions"><button class="btn test sm anlegenToggle" type="button">➕ Anlegen</button></div>'+
-        '<div class="anlegen-form hidden">'+
-          '<div class="grid2">'+
-            '<div class="full"><label>Bezeichnung *</label><input type="text" name="bezeichnung" value="'+esc(clean(r.it.bezeichnung))+'"></div>'+
-            '<div><label>Art.nr. Lieferant</label><input type="text" name="art_nr_lieferant" value="'+esc(artLief)+'"></div>'+
-            '<div><label>Art.nr. Hersteller</label><input type="text" name="art_nr_hersteller" value="'+esc(artHerst)+'"></div>'+
-            '<div class="full"><label>Lieferant</label><input type="text" name="lieferant" value="'+esc(clean(SENDER))+'"></div>'+
-            '<div><label>Lagerort</label>'+listSelectHtml("lagerort","",'name="lagerort"')+'</div>'+
-            '<div><label>Lagerplatz</label>'+listSelectHtml("lagerplatz","",'name="lagerplatz"')+'</div>'+
-            '<div><label>Warengruppe</label>'+listSelectHtml("warengruppe","",'name="warengruppe"')+'</div>'+
-            '<div><label>Maße</label><input type="text" name="mass" value=""></div>'+
-            '<div class="full"><label>Etikett-Typ</label><select name="etikett_typ"><option value="Artikel">Artikel</option><option value="Regal">Regal</option><option value="kein">kein</option></select></div>'+
-          '</div>'+
-          '<button class="btn test saveBtn" type="button" style="margin-top:10px">'+ANLEGEN_BTN+'</button>'+
-        '</div>';
-    }
-  }
 
   // Stamm-Korrektur nur für "prüfen" (Lieferantenname), PIN-geschützt
   if(r.status==="pruef" && r.art){
@@ -682,12 +656,8 @@ function ensurePin(){
   toast("Falsche PIN.",true); return false;
 }
 
-/* ---- Klicks in der Positionsliste (Anlegen + Stamm-Korrektur) ---- */
+/* ---- Klicks in der Positionsliste (Stamm-Korrektur, Etikett, Bestellungen) ---- */
 $("positions").addEventListener("click",(e)=>{
-  const toggle=e.target.closest(".anlegenToggle");
-  if(toggle){ const f=toggle.closest(".pos").querySelector(".anlegen-form"); if(f) f.classList.toggle("hidden"); return; }
-  const save=e.target.closest(".saveBtn");
-  if(save){ const pos=save.closest(".pos"); doInsert(+pos.dataset.i, pos.querySelector(".anlegen-form"), save); return; }
   const st=e.target.closest(".stammToggle");
   if(st){ if(!ensurePin()) return; const f=st.closest(".pos").querySelector(".stamm-form"); if(f) f.classList.toggle("hidden"); return; }
   const su=e.target.closest(".stammUebernehmen");
@@ -928,7 +898,6 @@ async function saveWareneingang(){
   const common={
     lieferschein_nr:$("archLsnr").value.trim()||null,
     lieferant:lieferant||null,
-    lagerplatz:$("archPlatz").value.trim()||null,
     kommission:$("archKomm").value.trim()||null,
     notiz:$("archNotiz").value.trim()||null,
     dateien
@@ -953,25 +922,11 @@ async function saveWareneingang(){
     if(error) throw error;
   }catch(e){ listWarn=" · Liste nicht gespeichert ("+esc(e.message||e)+")"; }
 
-  // Etiketten in die zentrale Druckliste (alle Artikel mit MV-Nummer, außer Etikett-Typ „kein")
-  let druckN=0;
-  try{
-    const m=new Map();
-    ROWS.forEach(r=>{
-      if((r.status==="ok"||r.status==="angelegt") && r.art && r.art.mv_code && r.art.etikett_typ!=="kein"){
-        m.set(r.art.mv_code,{mv_code:r.art.mv_code,bezeichnung:r.art.bezeichnung||null,mass:r.art.mass||null,lagerort:r.art.lagerort||null});
-      }
-    });
-    const dl=[...m.values()];
-    if(dl.length){
-      const {error}=await db.from("druckliste").upsert(dl,{onConflict:"mv_code",ignoreDuplicates:true});
-      if(error) throw error;
-      druckN=dl.length;
-    }
-  }catch(e){ /* Druckliste ist optional – blockiert das Speichern nicht */ }
+  // (Ausgelesene Artikel landen bewusst NICHT mehr automatisch in der Etiketten-Druckliste.
+  //  Etiketten werden bei Bedarf pro Position über „🏷️ Etikett drucken" gedruckt.)
 
   btn.disabled=false; btn.innerHTML='🗄️ Wareneingang speichern';
-  const okMsg=(dateien.length?(dateien.length+" Scan(s) abgelegt"):"gespeichert")+" · "+rows.length+" Position(en) in der Liste"+(druckN?" · "+druckN+" Etikett(en) in die Druckliste":"")+uploadWarn+listWarn;
+  const okMsg=(dateien.length?(dateien.length+" Scan(s) abgelegt"):"gespeichert")+" · "+rows.length+" Position(en) in der Liste"+uploadWarn+listWarn;
   st.innerHTML='<span style="color:#4ade80">✔ '+esc(okMsg)+'</span>';
   toast("Wareneingang gespeichert.");
 }
@@ -983,7 +938,7 @@ function resetAll(){
   FILES=[]; renderThumbs();
   ROWS=[]; SENDER=""; LSNR=""; SENDER_ANGLEICH=""; DUP_LS=null;
   { const dw=$("dupWarn"); if(dw){ dw.classList.add("hidden"); dw.innerHTML=""; } }
-  ["archLief","archLsnr","archPlatz","archKomm","archNotiz"].forEach(id=>{ if($(id)) $(id).value=""; });
+  ["archLief","archLsnr","archKomm","archNotiz"].forEach(id=>{ if($(id)) $(id).value=""; });
   if($("archStatus")) $("archStatus").textContent="";
   if($("archSave")){ $("archSave").disabled=false; $("archSave").innerHTML='🗄️ Wareneingang speichern'; }
   if($("orderInfo")) $("orderInfo").innerHTML="";
@@ -993,7 +948,7 @@ function resetAll(){
 function resetArchiveForNote(){
   if($("archLief")) $("archLief").value=SENDER||"";
   if($("archLsnr")) $("archLsnr").value=LSNR||"";
-  ["archPlatz","archKomm","archNotiz"].forEach(id=>{ if($(id)) $(id).value=""; });
+  ["archKomm","archNotiz"].forEach(id=>{ if($(id)) $(id).value=""; });
   if($("archStatus")) $("archStatus").textContent="";
   if($("archSave")){ $("archSave").disabled=false; $("archSave").innerHTML='🗄️ Wareneingang speichern'; }
 }
@@ -1012,7 +967,6 @@ async function loadListenData(){
     // Alle Listen alphabetisch (natürlich) sortieren
     ["warengruppe","lagerort","lagerplatz"].forEach(k=>{ if(LISTEN[k]) LISTEN[k].sort((a,b)=>String(a.wert).localeCompare(String(b.wert),"de",{sensitivity:"base",numeric:true})); });
   }catch(e){ /* Liste optional */ }
-  fillArchPlatz();
 }
 function listSelectOptions(kat,current){
   const items=(LISTEN[kat]||[]).map(x=>x.wert);
@@ -1052,11 +1006,6 @@ async function onListSelectChange(sel){
     refreshListSelects(kat); sel.value=neu;
   }
   sel.dataset.prev=sel.value;
-}
-function fillArchPlatz(){
-  const el=$("archPlatz"); if(!el||el.tagName!=="SELECT") return;
-  const cur=el.value||"";
-  el.innerHTML='<option value="">— Lagerplatz wählen —</option>'+(LISTEN.lagerplatz||[]).map(x=>'<option value="'+esc(x.wert)+'"'+(x.wert===cur?' selected':'')+'>'+esc(x.wert)+'</option>').join("");
 }
 document.addEventListener("change",e=>{ const s=e.target; if(s&&s.tagName==="SELECT"&&s.dataset&&s.dataset.listkat!=null) onListSelectChange(s); });
 
