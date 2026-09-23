@@ -175,7 +175,8 @@
         <div><label>Lagerplatz</label><input id="m_lp" type="text"></div>
         <div><label>Maß</label><input id="m_mass" type="text"></div>
         <div><label>Farbe</label><input id="m_farbe" type="text"></div>
-        <div><label>VPE (Einheit)</label><input id="m_vpe" type="text" placeholder="z. B. Stk., lfm"></div>
+        <div><label>Einheit</label><input id="m_einheit" type="text" placeholder="z. B. Stück, lfm, m²"></div>
+        <div><label>VPE-Größe</label><input id="m_vpe_menge" type="text" placeholder="z. B. 1, 200"></div>
         <div><label>EK (exkl.)</label><input id="m_ek" type="text"></div>
         <div><label>VK (inkl.)</label><input id="m_vk" type="text"></div>
         <div><label>Bestellweg</label><input id="m_bweg" type="text" placeholder="z. B. Online-Shop, Würth"></div>
@@ -398,7 +399,8 @@ const EXTRACT_SCHEMA = {
       herstellerNummer:{type:"string",description:"Hersteller-Artikelnummer oder EAN/GTIN, NUR wenn eindeutig vorhanden, sonst ''"},
       hersteller:{type:"string",description:"Herstellername/Marke, NUR wenn eindeutig vorhanden, sonst ''"},
       mass:{type:"string",description:"Maße/Abmessung/Größe (z. B. '9 mm', '7x10 cm'), NUR wenn vorhanden, sonst ''"},
-      farbe:{type:"string",description:"Farbe, NUR wenn vorhanden, sonst ''"}
+      farbe:{type:"string",description:"Farbe, NUR wenn vorhanden, sonst ''"},
+      einheit:{type:"string",description:"Mengeneinheit des Artikels, z. B. 'Stück', 'm' (Meter), 'lfm', 'm²', 'l', 'ml', 'kg', 'g', 'Paar', 'Karton', 'Rolle'. Aus der Mengen-/Einheiten-Spalte der Position. Wenn nicht erkennbar, ''"}
     },required:["artikelNummer","bezeichnung","preis"],additionalProperties:false}}
   },
   required:["sender","artikel"],additionalProperties:false
@@ -407,7 +409,8 @@ const EXTRACT_SCHEMA = {
 async function extractInvoice(base64, apiKey){
   const promptText = `Extrahiere alle echten Artikel/Waren-Posten aus dieser Rechnung.
 IGNORIERE Versandkosten, Porto, Fracht, Verpackung, Bearbeitungs-/Servicegebühren, Pauschalen, Rabatte, Skonto, Gutschriften und negative Beträge – das sind KEINE Artikel.
-Nutze für jeden Posten: artikelNummer (Lieferantennummer, sonst 'k.A.'), bezeichnung, preis (Einzelpreis netto). Falls eindeutig erkennbar zusätzlich herstellerNummer/EAN, hersteller, mass, farbe – sonst leeren String.
+Nutze für jeden Posten: artikelNummer (Lieferantennummer, sonst 'k.A.'), bezeichnung, preis (Einzelpreis netto). Falls eindeutig erkennbar zusätzlich herstellerNummer/EAN, hersteller, mass, farbe, einheit – sonst leeren String.
+EINHEIT: Übernimm die Mengeneinheit der Position aus der Mengen-/Einheiten-Spalte (z. B. Stück, m/Meter, lfm, m², l, ml, kg, g, Paar, Karton, Rolle). Wenn nicht erkennbar, leer lassen.
 WICHTIG zur bezeichnung: Übernimm den KOMPLETTEN Artikeltext. Viele Rechnungen (z. B. Würth) haben pro Posten MEHRERE Beschreibungszeilen – einen Klartext-Namen UND zusätzlich eine Kurz-/Typbezeichnung (oft ein Code mit Bindestrichen, z. B. 'SCHAB-KST-SET-2TLG'). Übernimm dann BEIDE in das eine Feld bezeichnung (Klartext zuerst, dann der Code), getrennt durch ein Leerzeichen. Lass keine Zeile weg.`;
   const system = `Du bist ein hochpräziser Assistent für Rechnungsdaten-Extraktion. Extrahiere ausschließlich echte Waren/Kern-Dienstleistungen; niemals Gebühren, Pauschalen, Rabatte oder Gutschriften. Antworte ausschließlich mit dem geforderten JSON.`;
   const body = { model:CLAUDE_MODEL, max_tokens:32000, system,
@@ -470,7 +473,7 @@ async function handlePdfs(files){
           hersteller:clean(a.hersteller),
           lieferant:lief,
           mass:clean(a.mass), farbe:clean(a.farbe),
-          vpe:"", ek_exkl:parseNum(a.preis),
+          einheit:clean(a.einheit), ek_exkl:parseNum(a.preis),
           quelle:f.name
         });
         n++;
@@ -497,7 +500,7 @@ const HEADER_ALIASES = {
   warengruppe:["warengruppe","kategorie","gruppe"],
   lagerort:["lagerort"], lagerplatz:["lagerplatz","platz"],
   mass:["maß","mass","abmessung","größe","groesse"],
-  farbe:["farbe","color"], vpe:["vpe","verpackungseinheit","einheit"],
+  farbe:["farbe","color"], einheit:["einheit","vpe","verpackungseinheit"], vpe_menge:["vpe-größe","vpe größe","vpe-menge","vpe menge","verpackungsmenge","gebindemenge"],
   ek_exkl:["ek (exkl.)","ek","einkaufspreis","preis","ek exkl","ek netto"],
   vk_inkl:["vk (inkl.)","vk","verkaufspreis"], gewicht_kg:["gewicht in kg","gewicht","gewicht kg"],
   bestell_mail:["bestell-mail","bestellmail","email"], produktlink:["produktlink","link","url"]
@@ -507,7 +510,7 @@ $("xlsxBtn").addEventListener("click", ()=>$("xlsxInput").click());
 $("xlsxInput").addEventListener("change", e=>{ const f=e.target.files[0]; if(f) readXlsx(f); e.target.value=""; });
 
 /* ---------- Manuelle Anlage ---------- */
-const MANUAL_FIELDS = ["m_bez","m_lief","m_anrl","m_herst","m_anrh","m_wg","m_lo","m_lp","m_mass","m_farbe","m_vpe","m_ek","m_vk","m_bweg","m_mail","m_link"];
+const MANUAL_FIELDS = ["m_bez","m_lief","m_anrl","m_herst","m_anrh","m_wg","m_lo","m_lp","m_mass","m_farbe","m_einheit","m_vpe_menge","m_ek","m_vk","m_bweg","m_mail","m_link"];
 $("manualAddBtn").addEventListener("click", ()=>{
   const bez = clean($("m_bez").value);
   if(!bez){ toast("Bitte eine Bezeichnung eingeben.", true); $("m_bez").focus(); return; }
@@ -522,7 +525,8 @@ $("manualAddBtn").addEventListener("click", ()=>{
     lagerplatz: clean($("m_lp").value),
     mass: clean($("m_mass").value),
     farbe: clean($("m_farbe").value),
-    vpe: clean($("m_vpe").value),
+    einheit: clean($("m_einheit").value)||"Stück",
+    vpe_menge: parseNum($("m_vpe_menge").value)||1,
     ek_exkl: parseNum($("m_ek").value),
     vk_inkl: parseNum($("m_vk").value),
     bestellweg: clean($("m_bweg").value),
@@ -551,9 +555,9 @@ function readXlsx(file){
       let n=0;
       for(let i=hi+1;i<grid.length;i++){
         const r=grid[i]; if(r.every(c=>String(c).trim()==="")) continue;
-        const o={bezeichnung:"",art_nr_lieferant:"",art_nr_hersteller:"",hersteller:"",lieferant:"",mass:"",farbe:"",vpe:"",ek_exkl:null,quelle:file.name};
+        const o={bezeichnung:"",art_nr_lieferant:"",art_nr_hersteller:"",hersteller:"",lieferant:"",mass:"",farbe:"",einheit:"",vpe_menge:null,ek_exkl:null,quelle:file.name};
         map.forEach((field,ci)=>{ if(!field) return; const val=r[ci];
-          if(field==="ek_exkl"||field==="vk_inkl"||field==="gewicht_kg") o[field]=parseNum(val);
+          if(field==="ek_exkl"||field==="vk_inkl"||field==="gewicht_kg"||field==="vpe_menge") o[field]=parseNum(val);
           else o[field]=clean(val); });
         if(!o.bezeichnung) continue;
         CANDIDATES.push(o); n++;
@@ -637,7 +641,7 @@ function makeNewRow(c){
     bezeichnung:c.bezeichnung, lieferant:c.lieferant,
     art_nr_lieferant:c.art_nr_lieferant, art_nr_hersteller:c.art_nr_hersteller,
     hersteller:c.hersteller, warengruppe:c.warengruppe||"", lagerort:c.lagerort||"", lagerplatz:c.lagerplatz||"",
-    mass:c.mass, farbe:c.farbe, vpe:c.vpe||"",
+    mass:c.mass, farbe:c.farbe, einheit:(c.einheit||"Stück"), vpe_menge:(c.vpe_menge!=null&&c.vpe_menge!==""?c.vpe_menge:1),
     ek_exkl:c.ek_exkl, vk_inkl:(c.vk_inkl!=null?c.vk_inkl:null),
     bestell_mail:c.bestell_mail||"", produktlink:c.produktlink||"",
     bestellweg:(c.bestellweg||""), etikett_typ: w?"kein":"",
@@ -895,7 +899,7 @@ const COLS = [
   ["art_nr_lieferant","Art.nr.Lief.","w-sm"],["art_nr_hersteller","Art.nr.Herst./EAN","w-sm"],
   ["hersteller","Hersteller",""],["warengruppe","Warengruppe *",""],
   ["lagerort","Lagerort *",""],["lagerplatz","Lagerplatz",""],
-  ["mass","Maß","w-sm"],["farbe","Farbe","w-sm"],["vpe","VPE","w-sm"],
+  ["mass","Maß","w-sm"],["farbe","Farbe","w-sm"],["einheit","Einheit","w-sm"],["vpe_menge","VPE-Größe","w-sm"],
   ["ek_exkl","EK","w-sm"],["vk_inkl","VK","w-sm"],
   ["bestellweg","Bestellweg",""],["bestell_mail","Bestell-Mail",""],["produktlink","Produktlink","w-lg"]
 ];
@@ -935,7 +939,7 @@ function renderNewTable(){
   t.querySelectorAll("button[data-fixmv]").forEach(b=>b.addEventListener("click",()=>openStammFix(+b.dataset.fixmv)));
   t.querySelectorAll("input,select:not([data-listkat])").forEach(el=>{
     el.addEventListener("change", ()=>{ const i=+el.dataset.i, f=el.dataset.f; let v=el.value;
-      if(f==="ek_exkl"||f==="vk_inkl") v=parseNum(v);
+      if(f==="ek_exkl"||f==="vk_inkl"||f==="vpe_menge") v=parseNum(v);
       NEWROWS[i][f]=v; });
   });
   t.querySelectorAll("button[data-rm]").forEach(b=>{ b.addEventListener("click", ()=> removeNew(+b.dataset.rm)); });
@@ -961,7 +965,7 @@ $("commitBtn").addEventListener("click", async ()=>{
     put("art_nr_lieferant",r.art_nr_lieferant); put("art_nr_hersteller",r.art_nr_hersteller);
     put("hersteller",r.hersteller); put("warengruppe",r.warengruppe);
     put("lagerort",r.lagerort); put("lagerplatz",r.lagerplatz);
-    put("mass",r.mass); put("farbe",r.farbe); put("vpe",r.vpe);
+    put("mass",r.mass); put("farbe",r.farbe); put("einheit",r.einheit); o.vpe_menge=parseNum(r.vpe_menge)||1;
     if(r.ek_exkl!=null) o.ek_exkl=r.ek_exkl; if(r.vk_inkl!=null) o.vk_inkl=r.vk_inkl;
     put("bestellweg",r.bestellweg); put("bestell_mail",r.bestell_mail); put("produktlink",r.produktlink);
     put("etikett_typ",r.etikett_typ);
@@ -1178,7 +1182,7 @@ function eingangToCandidates(row){
     hersteller: clean(a.hersteller),
     lieferant: lief,
     mass: clean(a.mass), farbe: clean(a.farbe),
-    vpe:"", ek_exkl: parseNum(a.preis),
+    einheit: clean(a.einheit), ek_exkl: parseNum(a.preis),
     quelle: row.datei_name||""
   })).filter(c=>c.bezeichnung);
 }
