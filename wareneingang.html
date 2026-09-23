@@ -212,7 +212,7 @@ $("apiKey").addEventListener("input",()=>safeSet("anthropic_api_key",$("apiKey")
 $("toggleKey").addEventListener("click",()=>{const i=$("apiKey");i.type=i.type==="password"?"text":"password"});
 
 /* ---- Stamm laden (echt + Test) ---- */
-let STAMM={byArtNr:new Map(),byHerst:new Map(),byName:new Map(),loaded:false};
+let STAMM={byArtNr:new Map(),byHerst:new Map(),byName:new Map(),liefCounts:{},loaded:false};
 function indexRow(r,source){
   r._src=source; // 'echt' | 'test'
   const na=norm(r.art_nr_lieferant);
@@ -246,11 +246,13 @@ async function pageAll(table){
   return all;
 }
 async function loadStamm(){
-  STAMM.byArtNr=new Map(); STAMM.byHerst=new Map(); STAMM.byName=new Map(); STAMM.loaded=false;
+  STAMM.byArtNr=new Map(); STAMM.byHerst=new Map(); STAMM.byName=new Map(); STAMM.liefCounts={}; STAMM.loaded=false;
   let echtN=0, testN=0;
   try{
     const echt=await pageAll("artikel");
     echt.forEach(r=>indexRow(r,"echt")); echtN=echt.length;
+    // Lieferanten-Schreibweisen (nur lesend) für die Angleichung sammeln
+    echt.forEach(r=>{ const lf=(r.lieferant||"").trim(); if(lf) STAMM.liefCounts[lf]=(STAMM.liefCounts[lf]||0)+1; });
   }catch(e){ $("dotSb").className="dot err"; $("sbTxt").textContent="Stamm-Fehler: "+(e.message||e); return; }
   // Test-Tabelle NUR im Testmodus zusätzlich einlesen; live zählt allein der echte Stamm
   if(TEST_MODE){
@@ -417,7 +419,7 @@ function fmtNum(n){ n=Number(n); return Number.isFinite(n)?(Number.isInteger(n)?
 function fmtDate(iso){ try{ const d=new Date(iso); return String(d.getDate()).padStart(2,"0")+"."+String(d.getMonth()+1).padStart(2,"0")+"."; }catch(e){ return ""; } }
 
 /* ---- Abgleich ---- */
-let ROWS=[], SENDER="", LSNR="";
+let ROWS=[], SENDER="", LSNR="", SENDER_ANGLEICH="";
 function classify(it){
   const senderTl=normLief(SENDER);
   // Kandidaten: Hauptnummer + alle 'nummern', normalisiert, ab 3 Zeichen
@@ -445,9 +447,52 @@ function classify(it){
   if(nameHits.length) return {status:"pruef",art:nameHits[0],note:"über Bezeichnung erkannt: "+nameHits.slice(0,3).map(h=>h.mv_code).join(", ")};
   return {status:"neu",art:null,note: cands.length?"":"keine Nummer erkannt"};
 }
+/* Lieferantennamen an den Stamm angleichen (NUR lesend – der Stamm wird nie geändert).
+   Bei sehr hoher Ähnlichkeit wird die Schreibweise aus dem Stamm zurückgegeben, sonst null.
+   Mehrdeutig (mehrere verschiedene ähnliche Stamm-Lieferanten) => null (nicht ändern). */
+const LIEF_STOP=new Set(["handelsgesellschaft","handel","vertrieb","vertriebs","deutschland","group","gruppe","nutzfahrzeuge"]);
+function nlift(s){ return normLief(s).replace(/-/g," ").replace(/\s+/g," ").trim(); }
+function levRatio(a,b){
+  a=a||""; b=b||""; const m=a.length, n=b.length; if(!m&&!n) return 1; if(!m||!n) return 0;
+  const d=Array.from({length:m+1},(_,i)=>[i].concat(Array(n).fill(0)));
+  for(let j=1;j<=n;j++) d[0][j]=j;
+  for(let i=1;i<=m;i++) for(let j=1;j<=n;j++){
+    const c=a[i-1]===b[j-1]?0:1;
+    d[i][j]=Math.min(d[i-1][j]+1, d[i][j-1]+1, d[i-1][j-1]+c);
+  }
+  return 1 - d[m][n]/Math.max(m,n);
+}
+function lieferantAngleich(sender){
+  const sn=nlift(sender); if(!sn) return null;
+  const st=sn.split(" ").filter(t=>t.length>=2);
+  let best=[], bestScore=0;
+  for(const name in STAMM.liefCounts){
+    const cn=nlift(name); if(!cn) continue;
+    let score=0;
+    if(cn===sn) score=3;
+    else{
+      const ct=cn.split(" ").filter(t=>t.length>=2);
+      const sub = st.length && ct.length && (st.every(t=>ct.includes(t)) || ct.every(t=>st.includes(t)));
+      const sharedNonGeneric = st.some(t=>ct.includes(t) && !LIEF_STOP.has(t));
+      if(sub && sharedNonGeneric) score=2;
+      else if(levRatio(sn,cn)>=0.9) score=1;
+    }
+    if(score>bestScore){ bestScore=score; best=[name]; }
+    else if(score===bestScore && score>0) best.push(name);
+  }
+  if(bestScore===0) return null;
+  const groups={}; best.forEach(n=>{ const k=nlift(n); (groups[k]=groups[k]||[]).push(n); });
+  if(Object.keys(groups).length!==1) return null;              // mehrdeutig -> nicht ändern
+  const cand = best.sort((a,b)=>(STAMM.liefCounts[b]||0)-(STAMM.liefCounts[a]||0))[0];
+  return (cand && cand.trim()!==String(sender).trim()) ? cand : null;
+}
 function match(data){
   SENDER=data.sender||"";
   LSNR=clean(data.lieferscheinNummer)||"";
+  // Lieferant (nur lesend) an eine sehr ähnliche Schreibweise im Stamm angleichen – überschreibbar
+  SENDER_ANGLEICH="";
+  const canon=lieferantAngleich(SENDER);
+  if(canon){ SENDER_ANGLEICH=SENDER; SENDER=canon; }
   resetArchiveForNote();   // Ablage-Felder immer auf den aktuellen Lieferschein setzen (kein Rest vom vorigen)
   const items=(data.items||[]).filter(it=>clean(it.bezeichnung));
   ROWS=items.map(it=>{ const c=classify(it); return {it,status:c.status,art:c.art,note:c.note,orders:[]}; });
@@ -570,7 +615,8 @@ function render(){
   const nNeu=ROWS.filter(r=>r.status==="neu").length;
   const nP=ROWS.filter(r=>r.status==="pruef").length;
   const nA=ROWS.filter(r=>r.status==="angelegt").length;
-  $("liefLine").innerHTML="Lieferant lt. Lieferschein: <span class='lief'>"+esc(SENDER||"—")+"</span> · "+ROWS.length+" Positionen";
+  $("liefLine").innerHTML="Lieferant lt. Lieferschein: <span class='lief'>"+esc(SENDER||"—")+"</span> · "+ROWS.length+" Positionen"+
+    (SENDER_ANGLEICH?" <span class='small' style='color:var(--warn)'>· an Stamm angeglichen (ausgelesen: „"+esc(SENDER_ANGLEICH)+"“)</span>":"");
   $("summary").innerHTML=
     '<div class="stat"><b style="color:#4ade80">'+nOk+'</b><span class="small muted">im Stamm</span></div>'+
     '<div class="stat"><b style="color:#f87171">'+nNeu+'</b><span class="small muted">neu</span></div>'+
@@ -904,7 +950,7 @@ $("archSave").addEventListener("click",saveWareneingang);
 // Alles leeren (für „Auswahl verwerfen" und „nächster Lieferschein")
 function resetAll(){
   FILES=[]; renderThumbs();
-  ROWS=[]; SENDER=""; LSNR="";
+  ROWS=[]; SENDER=""; LSNR=""; SENDER_ANGLEICH="";
   ["archLief","archLsnr","archLager","archKomm","archNotiz"].forEach(id=>{ if($(id)) $(id).value=""; });
   if($("archStatus")) $("archStatus").textContent="";
   if($("archSave")){ $("archSave").disabled=false; $("archSave").innerHTML='🗄️ Wareneingang speichern'; }
