@@ -900,7 +900,9 @@ function fileToUploadBlob(f){
       c.getContext("2d").drawImage(img,0,0,w,h);
       c.toBlob(b=>{ b?resolve({blob:b,ext:"jpg",contentType:"image/jpeg"}):reject(new Error("Bild-Encoding fehlgeschlagen")); },"image/jpeg",0.85);
     };
-    img.onerror=reject; img.src=URL.createObjectURL(f);
+    // Bild nicht dekodierbar (z. B. HEIC) -> Originaldatei unverändert hochladen, statt sie zu verwerfen
+    img.onerror=()=>{ const ext=((f.name||"").split(".").pop()||"").toLowerCase(); resolve({blob:f, ext:/^[a-z0-9]{1,5}$/.test(ext)?ext:"bin", contentType:f.type||"application/octet-stream"}); };
+    img.src=URL.createObjectURL(f);
   });
 }
 async function saveWareneingang(){
@@ -913,22 +915,29 @@ async function saveWareneingang(){
   btn.disabled=true; btn.innerHTML='<span class="spin"></span> speichern…'; st.textContent="";
   const lieferant=($("archLief").value.trim())||SENDER||"Unbekannt";
   const datumISO=new Date().toISOString().slice(0,10);
-  let dateien=[], uploadWarn="";
-  try{
-    let seite=1;
+  let dateien=[], uploadFail=0, lastErr="";
+  if(FILES.length){
     const yyyymm=datumISO.slice(0,7);
     const safeLief=safeName(lieferant);
     const stampBase=new Date().toISOString().replace(/[:.]/g,"-").replace("Z","");
+    let seite=1;
     for(const f of FILES){
-      const u=await fileToUploadBlob(f);
+      let u=null;
+      try{ u=await fileToUploadBlob(f); }catch(e){ uploadFail++; lastErr=(e&&e.message)||String(e); continue; }
       const path=safeLief+"/"+yyyymm+"/"+stampBase+"_"+(seite++)+"."+u.ext;
-      const {error}=await db.storage.from(SCAN_BUCKET).upload(path,u.blob,{contentType:u.contentType,upsert:true});
-      if(error) throw error;
-      dateien.push(path);
+      let ok=false;
+      for(let attempt=1; attempt<=3 && !ok; attempt++){   // bis zu 3 Versuche gegen transiente Fehler
+        try{ const {error}=await db.storage.from(SCAN_BUCKET).upload(path,u.blob,{contentType:u.contentType,upsert:true}); if(error) throw error; ok=true; }
+        catch(e){ lastErr=(e&&e.message)||String(e); if(attempt<3) await sleep(900); }
+      }
+      if(ok) dateien.push(path); else uploadFail++;
     }
-  }catch(e){
-    // Scan-Upload gescheitert -> NICHT abbrechen: Wareneingangsliste + Etiketten werden trotzdem gespeichert.
-    uploadWarn=" · ⚠ Scan nicht abgelegt ("+esc(e.message||e)+")";
+  }
+  let uploadWarn="";
+  if(uploadFail>0){
+    const proceed=confirm("⚠ "+uploadFail+" Scan(s) konnten NICHT hochgeladen werden."+(lastErr?"\n\nFehler: "+lastErr:"")+"\n\nWareneingang trotzdem OHNE diese(n) Scan(s) speichern?\n(Abbrechen = nichts speichern – du kannst es erneut versuchen.)");
+    if(!proceed){ btn.disabled=false; btn.innerHTML='🗄️ Wareneingang speichern'; st.textContent=""; return; }
+    uploadWarn=" · ⚠ "+uploadFail+" Scan(s) NICHT abgelegt";
   }
   // Eine Zeile JE POSITION (Artikel); gemeinsame Lieferschein-Infos werden wiederholt.
   const common={
