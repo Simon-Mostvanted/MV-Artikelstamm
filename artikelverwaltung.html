@@ -732,10 +732,10 @@ function renderMatched(){
       const eh = esc(m.einheit||"Einheit");
       if(m.vpe>1){
         ekLine="<span style='color:var(--warn)'>"+st+" · Rechnungspreis <b>"+fmtEk(m.invRaw)+"</b> · VPE = "+m.vpe+" "+eh+"</span>"+
-          "<br><span class='small muted'>Gespeichert wird der EK <b>pro "+eh+"</b> — worauf bezieht sich der Rechnungspreis?</span>";
+          "<br><span class='small muted'>Welchen Preis als EK übernehmen?</span>";
         const recV=m.basis==="vpe", recE=m.basis==="einheit";
-        const bV="<button class='"+(recV?"btn":"btn ghost")+"' data-ek='"+i+"' data-basis='vpe' style='padding:4px 10px' title='Rechnungspreis gilt für die ganze VPE ("+m.vpe+" "+eh+"), also geteilt durch "+m.vpe+"'>Rechnung je VPE → speichert <b>"+fmtEk(m.perVPE)+"</b>/"+eh+(recV?" · wahrscheinlich":"")+"</button>";
-        const bE="<button class='"+(recE?"btn":"btn ghost")+"' data-ek='"+i+"' data-basis='einheit' style='padding:4px 10px' title='Rechnungspreis gilt bereits für 1 "+eh+"'>Rechnung je "+eh+" → speichert <b>"+fmtEk(m.perUnit)+"</b>/"+eh+(recE?" · wahrscheinlich":"")+"</button>";
+        const bV="<button class='"+(recV?"btn":"btn ghost")+"' data-ek='"+i+"' data-basis='vpe' style='padding:4px 10px' title='Kleinerer Wert – Preis pro Stück'>Preis pro Stück übernehmen: <b>"+fmtEk(m.perVPE)+"</b>"+(recV?" · wahrscheinlich":"")+"</button>";
+        const bE="<button class='"+(recE?"btn":"btn ghost")+"' data-ek='"+i+"' data-basis='einheit' style='padding:4px 10px' title='Größerer Wert – Preis pro VPE'>Preis pro VPE übernehmen: <b>"+fmtEk(m.perUnit)+"</b>"+(recE?" · wahrscheinlich":"")+"</button>";
         buttons=bV+" "+bE;
       } else {
         ekLine="<span style='color:var(--warn)'>"+st+" · Rechnungspreis <b>"+fmtEk(m.invRaw)+"</b> pro "+eh+"</span>";
