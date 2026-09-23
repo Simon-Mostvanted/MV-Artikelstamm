@@ -138,7 +138,7 @@
       <div class="grid2">
         <div><label>Lieferant (für die Ablage)</label><input id="archLief" type="text" placeholder="Lieferant"></div>
         <div><label>Lieferschein-Nr.</label><input id="archLsnr" type="text" placeholder="falls vorhanden"></div>
-        <div><label>Lagerort</label><select id="archLager"></select></div>
+        <div><label>Lagerplatz</label><select id="archPlatz"></select></div>
         <div><label>Kommission</label><input id="archKomm" type="text" placeholder="optional"></div>
       </div>
       <label style="margin-top:8px">Notiz</label>
@@ -928,7 +928,7 @@ async function saveWareneingang(){
   const common={
     lieferschein_nr:$("archLsnr").value.trim()||null,
     lieferant:lieferant||null,
-    lagerort:$("archLager").value.trim()||null,
+    lagerplatz:$("archPlatz").value.trim()||null,
     kommission:$("archKomm").value.trim()||null,
     notiz:$("archNotiz").value.trim()||null,
     dateien
@@ -983,7 +983,7 @@ function resetAll(){
   FILES=[]; renderThumbs();
   ROWS=[]; SENDER=""; LSNR=""; SENDER_ANGLEICH=""; DUP_LS=null;
   { const dw=$("dupWarn"); if(dw){ dw.classList.add("hidden"); dw.innerHTML=""; } }
-  ["archLief","archLsnr","archLager","archKomm","archNotiz"].forEach(id=>{ if($(id)) $(id).value=""; });
+  ["archLief","archLsnr","archPlatz","archKomm","archNotiz"].forEach(id=>{ if($(id)) $(id).value=""; });
   if($("archStatus")) $("archStatus").textContent="";
   if($("archSave")){ $("archSave").disabled=false; $("archSave").innerHTML='🗄️ Wareneingang speichern'; }
   if($("orderInfo")) $("orderInfo").innerHTML="";
@@ -993,7 +993,7 @@ function resetAll(){
 function resetArchiveForNote(){
   if($("archLief")) $("archLief").value=SENDER||"";
   if($("archLsnr")) $("archLsnr").value=LSNR||"";
-  ["archLager","archKomm","archNotiz"].forEach(id=>{ if($(id)) $(id).value=""; });
+  ["archPlatz","archKomm","archNotiz"].forEach(id=>{ if($(id)) $(id).value=""; });
   if($("archStatus")) $("archStatus").textContent="";
   if($("archSave")){ $("archSave").disabled=false; $("archSave").innerHTML='🗄️ Wareneingang speichern'; }
 }
@@ -1010,7 +1010,7 @@ async function loadListenData(){
     LISTEN={warengruppe:[],lagerort:[],lagerplatz:[]};
     (data||[]).forEach(r=>{ (LISTEN[r.kategorie]=LISTEN[r.kategorie]||[]).push(r); });
   }catch(e){ /* Liste optional */ }
-  fillArchLager();
+  fillArchPlatz();
 }
 function listSelectOptions(kat,current){
   const items=(LISTEN[kat]||[]).map(x=>x.wert);
@@ -1051,10 +1051,10 @@ async function onListSelectChange(sel){
   }
   sel.dataset.prev=sel.value;
 }
-function fillArchLager(){
-  const el=$("archLager"); if(!el||el.tagName!=="SELECT") return;
+function fillArchPlatz(){
+  const el=$("archPlatz"); if(!el||el.tagName!=="SELECT") return;
   const cur=el.value||"";
-  el.innerHTML='<option value="">— Lagerort wählen —</option>'+(LISTEN.lagerort||[]).map(x=>'<option value="'+esc(x.wert)+'"'+(x.wert===cur?' selected':'')+'>'+esc(x.wert)+'</option>').join("");
+  el.innerHTML='<option value="">— Lagerplatz wählen —</option>'+(LISTEN.lagerplatz||[]).map(x=>'<option value="'+esc(x.wert)+'"'+(x.wert===cur?' selected':'')+'>'+esc(x.wert)+'</option>').join("");
 }
 document.addEventListener("change",e=>{ const s=e.target; if(s&&s.tagName==="SELECT"&&s.dataset&&s.dataset.listkat!=null) onListSelectChange(s); });
 
