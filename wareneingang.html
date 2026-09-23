@@ -126,6 +126,7 @@
 
   <div class="card hidden" id="resultCard">
     <h2>2 · Abgleich mit dem Stamm</h2>
+    <div id="dupWarn" class="hidden" style="margin:0 0 10px;padding:8px 12px;border:1px solid var(--warn);border-radius:8px;background:rgba(245,158,11,.12);color:#fbbf24;font-size:13px"></div>
     <div id="liefLine" class="sub"></div>
     <div class="summary" id="summary"></div>
     <div id="orderInfo" class="small" style="margin:0 0 10px"></div>
@@ -419,7 +420,7 @@ function fmtNum(n){ n=Number(n); return Number.isFinite(n)?(Number.isInteger(n)?
 function fmtDate(iso){ try{ const d=new Date(iso); return String(d.getDate()).padStart(2,"0")+"."+String(d.getMonth()+1).padStart(2,"0")+"."; }catch(e){ return ""; } }
 
 /* ---- Abgleich ---- */
-let ROWS=[], SENDER="", LSNR="", SENDER_ANGLEICH="";
+let ROWS=[], SENDER="", LSNR="", SENDER_ANGLEICH="", DUP_LS=null;
 function classify(it){
   const senderTl=normLief(SENDER);
   // Kandidaten: Hauptnummer + alle 'nummern', normalisiert, ab 3 Zeichen
@@ -498,6 +499,32 @@ function match(data){
   ROWS=items.map(it=>{ const c=classify(it); return {it,status:c.status,art:c.art,note:c.note,orders:[]}; });
   ROWS.forEach(attachOrders);
   render();
+  checkDuplicateLieferschein();   // Doppelt hochgeladenen Lieferschein erkennen (Lieferant + LS-Nr.)
+}
+/* Prüft, ob dieser Lieferschein (Lieferant + Lieferschein-Nr.) schon in 'wareneingang' erfasst ist. */
+async function checkDuplicateLieferschein(){
+  const box=$("dupWarn"); if(!box) return;
+  box.classList.add("hidden"); box.innerHTML=""; DUP_LS=null;
+  const nr=(LSNR||"").trim();
+  if(!nr){
+    box.classList.remove("hidden");
+    box.style.borderColor="var(--line)"; box.style.background="transparent"; box.style.color="var(--muted)";
+    box.textContent="Keine Lieferschein-Nr. erkannt – automatische Dubletten-Prüfung nicht möglich.";
+    return;
+  }
+  try{
+    const { data, error } = await db.from("wareneingang").select("created_at,lieferschein_nr,lieferant").eq("lieferschein_nr", nr);
+    if(error) throw error;
+    const tl=normLief(SENDER);
+    const hits=(data||[]).filter(r=>normLief(r.lieferant)===tl);
+    if(!hits.length) return;   // keine Dublette -> Hinweis bleibt ausgeblendet
+    const dates=hits.map(h=>h.created_at).filter(Boolean).sort();
+    const first=dates.length?String(dates[0]).slice(0,10):"";
+    DUP_LS={nr, lieferant:SENDER, count:hits.length, date:first};
+    box.classList.remove("hidden");
+    box.style.borderColor="var(--warn)"; box.style.background="rgba(245,158,11,.12)"; box.style.color="#fbbf24";
+    box.innerHTML="⚠ Dieser Lieferschein (Nr. <b>"+esc(nr)+"</b> · "+esc(SENDER)+") wurde bereits erfasst"+(first?" am <b>"+esc(first)+"</b>":"")+" ("+hits.length+" Position(en)). Du kannst trotzdem fortfahren.";
+  }catch(e){ /* Prüfung ist optional – bei Fehler nicht stören */ }
 }
 
 function bestNums(it){
@@ -872,6 +899,10 @@ function fileToUploadBlob(f){
 }
 async function saveWareneingang(){
   if(!ROWS.length && !FILES.length){ toast("Nichts zu speichern.",true); return; }
+  // Sicherheitsnetz: bereits erfasster Lieferschein (Lieferant + LS-Nr.)
+  if(DUP_LS){
+    if(!confirm("Achtung: Lieferschein Nr. "+DUP_LS.nr+" ("+DUP_LS.lieferant+") wurde bereits"+(DUP_LS.date?" am "+DUP_LS.date:"")+" erfasst.\n\nTrotzdem als neuen Wareneingang speichern?")) return;
+  }
   const btn=$("archSave"), st=$("archStatus");
   btn.disabled=true; btn.innerHTML='<span class="spin"></span> speichern…'; st.textContent="";
   const lieferant=($("archLief").value.trim())||SENDER||"Unbekannt";
@@ -950,7 +981,8 @@ $("archSave").addEventListener("click",saveWareneingang);
 // Alles leeren (für „Auswahl verwerfen" und „nächster Lieferschein")
 function resetAll(){
   FILES=[]; renderThumbs();
-  ROWS=[]; SENDER=""; LSNR=""; SENDER_ANGLEICH="";
+  ROWS=[]; SENDER=""; LSNR=""; SENDER_ANGLEICH=""; DUP_LS=null;
+  { const dw=$("dupWarn"); if(dw){ dw.classList.add("hidden"); dw.innerHTML=""; } }
   ["archLief","archLsnr","archLager","archKomm","archNotiz"].forEach(id=>{ if($(id)) $(id).value=""; });
   if($("archStatus")) $("archStatus").textContent="";
   if($("archSave")){ $("archSave").disabled=false; $("archSave").innerHTML='🗄️ Wareneingang speichern'; }
