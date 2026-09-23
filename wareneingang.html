@@ -1070,14 +1070,25 @@ async function liefSearch(){
     LIEF_GROUPS=[...groups.values()];
     box.innerHTML='<div class="small muted" style="margin-bottom:6px">'+LIEF_GROUPS.length+' Lieferschein(e)</div>'+LIEF_GROUPS.map((g,gi)=>{
       const posHtml=g.pos.map(p=>"<div class='small' style='padding:2px 0;border-top:1px dashed var(--line)'>"+esc(p.bezeichnung||"—")+(p.menge?" · "+esc(p.menge):"")+(p.verwendung?" · <span class='muted'>"+esc(p.verwendung)+"</span>":"")+(p.kommission?" · Komm.: "+esc(p.kommission):"")+"</div>").join("");
-      const scanBtns=(g.dateien||[]).map((p,k)=>"<button class='btn secondary sm' data-scan='"+gi+"' data-idx='"+k+"' style='padding:3px 10px;margin:2px 6px 0 0'>🖼️ Scan "+(k+1)+"</button>").join("");
+      const scanEls=(g.dateien||[]).map((p,k)=>{
+        const ext=String(p).split(".").pop().toLowerCase();
+        const isImg=/^(jpg|jpeg|png|webp|gif)$/.test(ext);
+        return isImg
+          ? "<img data-scan='"+gi+"' data-idx='"+k+"' loading='lazy' alt='Lieferschein-Scan' title='Klicken zum Öffnen in voller Größe' style='max-height:280px;max-width:100%;border:1px solid var(--line);border-radius:6px;margin:6px 6px 0 0;cursor:pointer;vertical-align:top'>"
+          : "<button class='btn secondary sm' data-scan='"+gi+"' data-idx='"+k+"' style='padding:3px 10px;margin:6px 6px 0 0'>📄 Scan "+(k+1)+" öffnen</button>";
+      }).join("");
       return "<details style='border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin-bottom:8px'>"+
         "<summary style='cursor:pointer'><b>"+esc(g.lieferant)+"</b> · LS-Nr. "+esc(g.nr)+" · "+esc(g.day)+" · "+g.pos.length+" Pos.</summary>"+
-        "<div style='margin-top:6px'>"+posHtml+"</div>"+
-        (scanBtns?"<div style='margin-top:8px'>"+scanBtns+"</div>":"")+
+        (scanEls?"<div style='margin-top:8px;display:flex;flex-wrap:wrap'>"+scanEls+"</div>":"<div class='small muted' style='margin-top:8px'>kein Scan hinterlegt</div>")+
+        "<div style='margin-top:8px'>"+posHtml+"</div>"+
       "</details>";
     }).join("");
-    box.querySelectorAll("button[data-scan]").forEach(b=>b.addEventListener("click",()=>openScan(+b.dataset.scan,+b.dataset.idx)));
+    box.querySelectorAll("[data-scan]").forEach(el=>el.addEventListener("click",()=>openScan(+el.dataset.scan,+el.dataset.idx)));
+    // Scan-Bilder asynchron laden (signierte URLs)
+    box.querySelectorAll("img[data-scan]").forEach(async img=>{
+      const g=LIEF_GROUPS[+img.dataset.scan]; const path=g&&g.dateien[+img.dataset.idx]; if(!path) return;
+      try{ const {data}=await db.storage.from(SCAN_BUCKET).createSignedUrl(path,3600); if(data&&data.signedUrl) img.src=data.signedUrl; }catch(e){}
+    });
   }catch(e){ box.innerHTML='<div class="small" style="color:var(--warn)">Suchfehler: '+esc(e.message||e)+'</div>'; }
 }
 async function openScan(gi,k){
