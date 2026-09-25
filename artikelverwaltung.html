@@ -774,6 +774,7 @@ async function reactivateMatched(i){
     const row=STAMM.rows.find(r=>r.mv_nr===m.mv_nr); if(row) row.aktiv=true;
     renderMatched();
     toast("Reaktiviert: "+m.mv_code);
+    checkEingangComplete();
   }catch(e){ toast("Reaktivieren fehlgeschlagen: "+(e.message||e), true); }
 }
 async function updateMatchedBez(i){
@@ -788,6 +789,7 @@ async function updateMatchedBez(i){
     m.stBez=val; m.bezDiff=false;
     renderMatched();
     toast("Stamm-Bezeichnung aktualisiert: "+m.mv_code);
+    checkEingangComplete();
   }catch(e){ toast("Update fehlgeschlagen: "+(e.message||e), true); }
 }
 async function updateEk(i, basis){
@@ -806,6 +808,7 @@ async function updateEk(i, basis){
     for(const arr of STAMM.byName.values()){ const e=arr.find(x=>x.mv_nr===m.mv_nr); if(e) e.ek_exkl=val; }
     renderMatched();
     toast("EK aktualisiert: "+m.mv_code+" → "+fmtEk(val)+" pro "+(m.einheit||"Einheit"));
+    checkEingangComplete();
   }catch(e){ renderMatched(); toast("EK-Update fehlgeschlagen: "+(e.message||e), true); }
 }
 /* ----- Mögliche Dubletten prüfen (Preisabgleich + Namen-Angleich pro Fall) ----- */
@@ -866,6 +869,7 @@ function reviewAsSame(i,j){
   REVIEW.splice(i,1);
   renderSummary(); renderMatched(); renderReview();
   toast("Als Stamm-Artikel "+h.mv_code+" übernommen – Preis oben prüfen.");
+  checkEingangComplete();
 }
 function reviewAsNew(i){
   const rv=REVIEW[i]; if(!rv) return;
@@ -892,6 +896,21 @@ async function reviewUpdateStamm(i,j,field){
     if(error) throw error;
     updateStammField(h.mv_nr, field, val);
     h[field]=val;
+    // 3b: Lieferant angeglichen und Art.nr. ist eindeutig gleich -> derselbe Artikel, ohne extra "EK abgleichen"-Klick.
+    if(field==="lieferant"){
+      const invNa=norm(rv.c.art_nr_lieferant), hitNa=norm(h.art_nr_lieferant);
+      if(invNa && hitNa===invNa){
+        const invEk=(rv.c.ek_exkl!=null && rv.c.ek_exkl!=="")?Number(rv.c.ek_exkl):null;
+        const stEk=(h.ek_exkl!=null)?Number(h.ek_exkl):null;
+        const ekDiff = invEk!=null && (stEk==null || Math.abs(stEk-invEk)>0.001);
+        MATCHED.push(makeMatched(rv.c, h));
+        REVIEW.splice(i,1);
+        renderSummary(); renderMatched(); renderReview();
+        toast("Lieferant angeglichen · "+h.mv_code+" übernommen"+(ekDiff?" – EK oben prüfen":" ✓"));
+        checkEingangComplete();
+        return;
+      }
+    }
     renderReview();
     toast("Stamm-"+label+" aktualisiert: "+h.mv_code);
   }catch(e){ toast("Update fehlgeschlagen: "+(e.message||e), true); }
@@ -1001,6 +1020,7 @@ $("commitBtn").addEventListener("click", async ()=>{
     showResult(inserted);
     toast(inserted.length+" Artikel angelegt – MV-Nummern vergeben ✓");
     await loadStamm(); // Stamm aktualisieren (nächste Nummer etc.)
+    NEWROWS=[]; renderSummary(); renderNewTable(); updateCommitUI(); // angelegte Zeilen aus der Anlege-Tabelle entfernen
   }catch(e){
     $("commitInfo").textContent="";
     const m=(e.message||String(e));
@@ -1317,6 +1337,19 @@ async function markEingang(id, status){
     toast(status==="erledigt"?"Rechnung als erledigt markiert.":"Rechnung ignoriert.");
     setMode("eingang"); loadEingang();
   }catch(e){ toast("Konnte Status nicht setzen: "+(e.message||e), true); }
+}
+/* 3a: Gibt es in der offenen Rechnung noch etwas zu pflegen? (EK-Abw. / Prüfen / neue Artikel) */
+function eingangHasPending(){
+  const matchedPending = MATCHED.some(m => m.ekStatus==="diff" || m.ekStatus==="missing" || m.bezDiff || m.archived);
+  return matchedPending || REVIEW.length>0 || NEWROWS.length>0;
+}
+/* 3a: Wenn nach einer Aktion nichts mehr offen ist -> Rechnung automatisch erledigen + zurück zur Liste */
+function checkEingangComplete(){
+  if(EINGANG_CURRENT==null) return;
+  if(eingangHasPending()) return;
+  const id=EINGANG_CURRENT;
+  toast("Alles gepflegt – Rechnung erledigt, zurück zur Liste ✓");
+  markEingang(id, "erledigt");
 }
 
 const EDIT_FIELDS = [
