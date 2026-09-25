@@ -393,13 +393,15 @@ const EXTRACT_SCHEMA = {
   type:"object",
   properties:{
     sender:{type:"string",description:"Rechnungssteller/Lieferant, sonst 'k.A.'"},
-    rabattGesamtNetto:{type:"number",description:"Nur wenn ein Rabatt/Nachlass als EIGENE Position oder als Gesamt-Rabatt auf die ganze Rechnung ausgewiesen ist und NICHT bereits in den einzelnen positionswertNetto abgezogen wurde: der gesamte Rabattbetrag in EURO, NETTO (ohne MwSt), als POSITIVE Zahl (Betrag, der abgezogen wird). Sonst 0. Positionsbezogene Rabatte, die du schon in positionswertNetto berücksichtigt hast, hier NICHT nochmal angeben."},
+    preiseInklMwst:{type:"boolean",description:"true, wenn die Preise/Beträge auf der Rechnung INKL. MwSt (brutto) ausgewiesen sind (typisch bei Endkundenrechnungen, erkennbar an 'inkl. MwSt', 'Bruttopreis', Gesamtbetrag = Bruttobetrag). false bei Netto-/B2B-Rechnungen ('zzgl. MwSt', 'Nettobetrag'). Im Zweifel false."},
+    mwstSatz:{type:"number",description:"MwSt-Satz in Prozent als Zahl (z. B. 19 oder 7), der auf die Warenpositionen angewendet wird. Wenn preiseInklMwst=true, MUSS dieser Satz gesetzt sein. Sonst 0."},
+    rabattGesamtNetto:{type:"number",description:"Nur wenn ein Rabatt/Nachlass als EIGENE Position oder als Gesamt-Rabatt auf die ganze Rechnung ausgewiesen ist und NICHT bereits in den einzelnen positionswertNetto abgezogen wurde: der gesamte Rabattbetrag in EURO als POSITIVE Zahl, GENAU WIE GEDRUCKT (bei Rechnungen inkl. MwSt also der Brutto-Rabattbetrag – NICHT selbst umrechnen). Sonst 0. Positionsbezogene Rabatte, die du schon in positionswertNetto berücksichtigt hast, hier NICHT nochmal angeben."},
     artikel:{type:"array",items:{type:"object",properties:{
       artikelNummer:{type:"string",description:"Artikel-/Bestellnummer des Lieferanten, sonst 'k.A.'"},
       bezeichnung:{type:"string",description:"Vollständige Artikelbezeichnung. Übernimm ALLE Beschreibungszeilen des Postens in gedruckter Reihenfolge – steht z. B. zusätzlich zum Klartext-Namen eine Kurz-/Typbezeichnung (Code mit Bindestrichen, z. B. 'SCHAB-KST-SET-2TLG'), hänge sie mit einem Leerzeichen an. Nichts weglassen."},
       preis:{type:"number",description:"Einzelpreis netto wie ausgewiesen (Einkaufspreis pro Preiseinheit)"},
       menge:{type:"number",description:"Berechnete/gelieferte Menge dieser Position in der angegebenen Einheit (Mengen-Spalte). Beispiele: 100-m-Rolle = 100, 200 Stück = 200, 3 Stangen = 3. Bei Meterware in Metern."},
-      positionswertNetto:{type:"number",description:"Gesamtpreis DIESER Position in EURO, NETTO (ohne MwSt) und NACH Abzug aller Positionsrabatte – also die Zeilensumme/der Gesamtbetrag der Zeile. WICHTIG: Weist die Rechnung Preise inkl. MwSt aus, rechne auf netto zurück (Bruttobetrag ÷ (1 + MwSt-Satz), z. B. ÷1,19). Ist ein Positionsrabatt in % oder € ausgewiesen, ziehe ihn vorher ab."},
+      positionswertNetto:{type:"number",description:"Gesamtpreis/Zeilensumme DIESER Position in EURO, NACH Abzug von Positionsrabatten, GENAU WIE AUF DER RECHNUNG GEDRUCKT. Rechne die MwSt NICHT selbst heraus: Bei Rechnungen inkl. MwSt gib den Brutto-Zeilenbetrag an und setze oben preiseInklMwst=true + mwstSatz – die Umrechnung auf netto macht das Programm. Ist ein Positionsrabatt in % oder € ausgewiesen, ziehe NUR diesen vorher ab."},
       herstellerNummer:{type:"string",description:"Hersteller-Artikelnummer oder EAN/GTIN, NUR wenn eindeutig vorhanden, sonst ''"},
       hersteller:{type:"string",description:"Herstellername/Marke, NUR wenn eindeutig vorhanden, sonst ''"},
       mass:{type:"string",description:"Maße/Abmessung/Größe (z. B. '9 mm', '7x10 cm'), NUR wenn vorhanden, sonst ''"},
@@ -417,9 +419,9 @@ Nutze für jeden Posten: artikelNummer (Lieferantennummer, sonst 'k.A.'), bezeic
 EINHEIT: Übernimm die Mengeneinheit der Position aus der Mengen-/Einheiten-Spalte (z. B. Stück, m/Meter, lfm, m², l, ml, kg, g, Paar, Karton, Rolle). Wenn nicht erkennbar, leer lassen.
 PREIS PRO EINHEIT (sehr wichtig): Fülle für JEDE Position zusätzlich menge und positionswertNetto aus, denn daraus wird der Einkaufspreis pro Einheit berechnet (positionswertNetto ÷ menge).
 - menge = die tatsächliche Menge in der Einheit (bei einer 100-m-Rolle ist die Menge 100 m, nicht 1 Rolle; bei 200 Stück ist die Menge 200).
-- positionswertNetto = Gesamtbetrag DIESER Zeile in Euro, NETTO (ohne MwSt) und NACH Abzug von Positionsrabatten.
+- positionswertNetto = Gesamtbetrag DIESER Zeile in Euro, NACH Abzug von Positionsrabatten, GENAU WIE GEDRUCKT (netto bei Netto-Rechnungen, brutto bei Rechnungen inkl. MwSt).
 - Ist der Einzelpreis „pro 100" / „pro 1000" / je Preiseinheit (PE) angegeben, verlasse dich NICHT auf den Einzelpreis – gib menge und positionswertNetto korrekt an.
-- Weist die Rechnung Bruttopreise inkl. MwSt aus (häufig bei Kleinmengen-/Endkundenrechnungen), rechne positionswertNetto auf netto zurück (Betrag ÷ (1 + MwSt-Satz)).
+- MwSt NICHT selbst herausrechnen: Sind die Preise inkl. MwSt (Endkundenrechnung, „inkl. MwSt"/„Bruttopreis"), setze oben preiseInklMwst=true und mwstSatz (z. B. 19) – die App rechnet Positionen UND Rabatt einheitlich auf netto um.
 - Ein Rabatt, der als EIGENE Position bzw. als Gesamt-Rabatt der Rechnung ausgewiesen ist, wird NICHT als Artikel erfasst – gib seinen Gesamtbetrag stattdessen in rabattGesamtNetto (netto, positive Zahl) an, damit er anteilig auf die Positionen verrechnet werden kann. Ist der Rabatt schon je Position in positionswertNetto abgezogen, lasse rabattGesamtNetto = 0.
 WICHTIG zur bezeichnung: Übernimm den KOMPLETTEN Artikeltext. Viele Rechnungen (z. B. Würth) haben pro Posten MEHRERE Beschreibungszeilen – einen Klartext-Namen UND zusätzlich eine Kurz-/Typbezeichnung (oft ein Code mit Bindestrichen, z. B. 'SCHAB-KST-SET-2TLG'). Übernimm dann BEIDE in das eine Feld bezeichnung (Klartext zuerst, dann der Code), getrennt durch ein Leerzeichen. Lass keine Zeile weg.`;
   const system = `Du bist ein hochpräziser Assistent für Rechnungsdaten-Extraktion. Extrahiere ausschließlich echte Waren/Kern-Dienstleistungen; niemals Gebühren, Pauschalen, Rabatte oder Gutschriften. Antworte ausschließlich mit dem geforderten JSON.`;
@@ -473,10 +475,11 @@ async function handlePdfs(files){
       const b64 = await readFileAsBase64(f);
       const data = await extractInvoice(b64, apiKey);
       const lief = clean(data.sender);
+      const vf = vatFactorFrom(data.preiseInklMwst, data.mwstSatz);
       const fileCands=[];
       for(const a of (data.artikel||[])){
         const bez=clean(a.bezeichnung); if(!bez) continue;
-        const u=invUnitFromRaw(a);
+        const u=invUnitFromRaw(a, vf);
         fileCands.push({
           bezeichnung:bez,
           art_nr_lieferant:clean(a.artikelNummer),
@@ -489,7 +492,7 @@ async function handlePdfs(files){
           quelle:f.name
         });
       }
-      applyGlobalRabatt(fileCands, data.rabattGesamtNetto);
+      { let rab=parseNum(data.rabattGesamtNetto); if(rab!=null) rab=rab*vf; applyGlobalRabatt(fileCands, rab); }
       for(const c of fileCands) CANDIDATES.push(c);
       const n=fileCands.length;
       setFileRow(id,true, n+" Artikel erkannt");
@@ -622,14 +625,21 @@ function clearCapture(){
 /* Paket 1: Rechnungs-EK pro Basiseinheit bestimmen.
    Primär = Netto-Positionswert ÷ Menge (deckt Preiseinheit, Rabatt und MwSt automatisch ab).
    Fallback = Einzelpreis wie ausgewiesen (wenn menge/positionswertNetto fehlen, z. B. Alt-Auslesen). */
-function invUnitFromRaw(a){
+function invUnitFromRaw(a, vatFactor){
+  const vf     = (vatFactor!=null && vatFactor>0) ? vatFactor : 1;   // 1 = netto, <1 = Brutto→Netto
   const menge  = parseNum(a.menge);
-  const pw     = parseNum(a.positionswertNetto);
+  let pw       = parseNum(a.positionswertNetto);
   const einzel = parseNum(a.preis);
+  if(pw!=null) pw = pw*vf;
   if(pw!=null && pw>0 && menge!=null && menge>0){
     return { ek_exkl: pw/menge, menge, positionswert_netto: pw, einzelpreis: einzel, ek_berechnet:true };
   }
   return { ek_exkl: einzel, menge:(menge!=null?menge:null), positionswert_netto:(pw!=null?pw:null), einzelpreis: einzel, ek_berechnet:false };
+}
+/* Netto-Faktor aus MwSt-Angaben: bei „inkl. MwSt" → 1/(1+satz/100), sonst 1 */
+function vatFactorFrom(inkl, satz){
+  const s = parseNum(satz);
+  return (inkl===true && s!=null && s>0) ? 1/(1+s/100) : 1;
 }
 /* Paket 1: Als eigene Position/gesamt ausgewiesener Rabatt wird proportional zum Netto-Wert auf die
    berechneten Positionen verteilt und der EK entsprechend gesenkt. Mutiert die übergebenen Kandidaten. */
@@ -1261,8 +1271,9 @@ $("eingangBackBtn").addEventListener("click", ()=>{ setMode("eingang"); loadEing
 /* ---------- Eingang: automatisch ausgelesene Rechnungen ---------- */
 function eingangToCandidates(row){
   const lief = clean(row.sender);
+  const vf = vatFactorFrom(row.preise_inkl_mwst, row.mwst_satz);
   const cands = (row.positionen||[]).map(a=>{
-    const u=invUnitFromRaw(a);
+    const u=invUnitFromRaw(a, vf);
     return {
       bezeichnung: clean(a.bezeichnung),
       art_nr_lieferant: clean(a.artikelNummer),
@@ -1275,7 +1286,7 @@ function eingangToCandidates(row){
       quelle: row.datei_name||""
     };
   }).filter(c=>c.bezeichnung);
-  applyGlobalRabatt(cands, row.rabatt_gesamt_netto);
+  { let rab=parseNum(row.rabatt_gesamt_netto); if(rab!=null) rab=rab*vf; applyGlobalRabatt(cands, rab); }
   return cands;
 }
 // Zählt je Rechnung die zu pflegenden Positionen (read-only, mutiert keine Globals)
