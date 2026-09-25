@@ -398,7 +398,7 @@ const EXTRACT_SCHEMA = {
     mwstSatz:{type:"number",description:"MwSt-Satz in Prozent als Zahl (z. B. 19 oder 7), der auf die Warenpositionen angewendet wird. Wenn preiseInklMwst=true, MUSS dieser Satz gesetzt sein. Sonst 0."},
     rabattGesamtNetto:{type:"number",description:"Nur wenn ein Rabatt/Nachlass als EIGENE Position oder als Gesamt-Rabatt auf die ganze Rechnung ausgewiesen ist und NICHT bereits in den einzelnen positionswertNetto abgezogen wurde: der gesamte Rabattbetrag in EURO als POSITIVE Zahl, GENAU WIE GEDRUCKT (bei Rechnungen inkl. MwSt also der Brutto-Rabattbetrag – NICHT selbst umrechnen). Sonst 0. Positionsbezogene Rabatte, die du schon in positionswertNetto berücksichtigt hast, hier NICHT nochmal angeben."},
     artikel:{type:"array",items:{type:"object",properties:{
-      artikelNummer:{type:"string",description:"Artikel-/Bestellnummer des Lieferanten, sonst 'k.A.'"},
+      artikelNummer:{type:"string",description:"Artikel-/Bestellnummer des Lieferanten (die eigenständige Produktnummer), sonst 'k.A.'. NICHT die laufende Positions-/Zeilennummer der Rechnung (Pos./lfd. Nr., meist 1, 2, 3 … ganz links) – die gehört NICHT dazu und darf nicht mit der Artikelnummer verschmolzen werden."},
       bezeichnung:{type:"string",description:"Vollständige Artikelbezeichnung. Übernimm ALLE Beschreibungszeilen des Postens in gedruckter Reihenfolge – steht z. B. zusätzlich zum Klartext-Namen eine Kurz-/Typbezeichnung (Code mit Bindestrichen, z. B. 'SCHAB-KST-SET-2TLG'), hänge sie mit einem Leerzeichen an. Nichts weglassen."},
       preis:{type:"number",description:"Einzelpreis netto wie ausgewiesen (Einkaufspreis pro Preiseinheit)"},
       menge:{type:"number",description:"Berechnete/gelieferte Menge dieser Position in der angegebenen Einheit (Mengen-Spalte). Beispiele: 100-m-Rolle = 100, 200 Stück = 200, 3 Stangen = 3. Bei Meterware in Metern."},
@@ -417,6 +417,7 @@ async function extractInvoice(base64, apiKey){
   const promptText = `Extrahiere alle echten Artikel/Waren-Posten aus dieser Rechnung.
 IGNORIERE Versandkosten, Porto, Fracht, Verpackung, Bearbeitungs-/Servicegebühren, Pauschalen, Rabatte, Skonto, Gutschriften und negative Beträge – das sind KEINE Artikel.
 Nutze für jeden Posten: artikelNummer (Lieferantennummer, sonst 'k.A.'), bezeichnung, preis (Einzelpreis netto). Falls eindeutig erkennbar zusätzlich herstellerNummer/EAN, hersteller, mass, farbe, einheit – sonst leeren String.
+ARTIKELNUMMER: Übernimm NUR die eigenständige Artikel-/Bestellnummer des Lieferanten. Die laufende Positions-/Zeilennummer der Rechnung (Pos./lfd. Nr., meist 1, 2, 3 … ganz links am Zeilenanfang) gehört NICHT dazu – nicht mit der Artikelnummer verschmelzen.
 EINHEIT: Übernimm die Mengeneinheit der Position aus der Mengen-/Einheiten-Spalte (z. B. Stück, m/Meter, lfm, m², l, ml, kg, g, Paar, Karton, Rolle). Wenn nicht erkennbar, leer lassen.
 PREIS PRO EINHEIT (sehr wichtig): Fülle für JEDE Position zusätzlich menge und positionswertNetto aus, denn daraus wird der Einkaufspreis pro Einheit berechnet (positionswertNetto ÷ menge).
 - menge = die tatsächliche Menge in der Einheit (bei einer 100-m-Rolle ist die Menge 100 m, nicht 1 Rolle; bei 200 Stück ist die Menge 200).
