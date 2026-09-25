@@ -1420,6 +1420,7 @@ function checkEingangComplete(){
 
 const EDIT_FIELDS = [
   ["bezeichnung","Bezeichnung","text","full"],
+  ["alias","Interne Bezeichnung / Suchbegriffe","text","full"],
   ["lieferant","Lieferant","text"], ["art_nr_lieferant","Art.nr. Lieferant","text"],
   ["hersteller","Hersteller","text"], ["art_nr_hersteller","Art.nr. Hersteller / EAN","text"],
   ["warengruppe","Warengruppe","list"], ["lagerort","Lagerort","list"], ["lagerplatz","Lagerplatz","list"],
@@ -1436,7 +1437,7 @@ $("editSearch").addEventListener("keydown", e=>{ if(e.key==="Enter") editSearch(
 function normLoose(s){ return norm(s).replace(/[\s.\-_/]/g,""); }
 function countOcc(text, term){ if(!term) return 0; let n=0,i=0; while((i=text.indexOf(term,i))!==-1){ n++; i+=term.length; } return n; }
 /* Felder, die zusätzlich zur Bezeichnung durchsucht werden (Herstellername, Lagerort, Maß … alle sinnvollen Textspalten). */
-const SEARCH_OTHER_FIELDS = ["lieferant","hersteller","art_nr_lieferant","art_nr_hersteller","mv_code","warengruppe","lagerort","lagerplatz","mass","farbe","einheit","bestellweg","produktlink","bestell_mail"];
+const SEARCH_OTHER_FIELDS = ["alias","lieferant","hersteller","art_nr_lieferant","art_nr_hersteller","mv_code","warengruppe","lagerort","lagerplatz","mass","farbe","einheit","bestellweg","produktlink","bestell_mail"];
 /* Kontext-/Mehrwortsuche über den geladenen Stamm (wie in der Bestell-App):
    exakte Artikelnummer zuerst; sonst muss JEDES Wort vorkommen, Treffer im Namen zählen doppelt. */
 function searchStamm(q){
@@ -1480,7 +1481,7 @@ function editSearch(){
     const actBtn = arch
       ? `<button class="btn ghost" data-react="${esc(a.mv_code)}" style="padding:4px 10px" title="Wieder aktiv setzen">↩ Reaktivieren</button>`
       : `<button class="btn ghost" data-arch="${esc(a.mv_code)}" style="padding:4px 10px" title="Artikel archivieren (nicht löschen)">🗄 Archivieren</button>`;
-    return `<div class="frow"${arch?' style="opacity:.6"':''}><b style="min-width:80px">${esc(a.mv_code)}</b><span class="fn">${esc(a.bezeichnung||"")}${badge} <span class="muted">· ${esc(a.lieferant||"")}${a.hersteller?" · "+esc(a.hersteller):""}${a.mass?" · "+esc(a.mass):""}${a.art_nr_lieferant?" · "+esc(a.art_nr_lieferant):""}</span></span>${actBtn}<button class="btn" data-edit="${esc(a.mv_code)}" style="padding:4px 12px">bearbeiten</button></div>`;
+    return `<div class="frow"${arch?' style="opacity:.6"':''}><b style="min-width:80px">${esc(a.mv_code)}</b><span class="fn">${esc(a.bezeichnung||"")}${badge} <span class="muted">· ${esc(a.lieferant||"")}${a.hersteller?" · "+esc(a.hersteller):""}${a.mass?" · "+esc(a.mass):""}${a.art_nr_lieferant?" · "+esc(a.art_nr_lieferant):""}${a.alias?" · 🔎 "+esc(a.alias):""}</span></span>${actBtn}<button class="btn" data-edit="${esc(a.mv_code)}" style="padding:4px 12px">bearbeiten</button></div>`;
   }).join("");
   $("editResults").querySelectorAll("button[data-edit]").forEach(b=>b.addEventListener("click",()=>loadEditForm(EDIT_HITS[b.dataset.edit])));
   $("editResults").querySelectorAll("button[data-arch]").forEach(b=>b.addEventListener("click",()=>setAktiv(EDIT_HITS[b.dataset.arch], false)));
