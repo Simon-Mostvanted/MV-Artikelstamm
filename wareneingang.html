@@ -248,7 +248,7 @@ function nameHitsFor(nn){
 async function pageAll(table){
   let all=[],from=0,page=1000;
   while(true){
-    const {data,error}=await db.from(table).select("mv_nr,mv_code,art_nr_lieferant,art_nr_hersteller,lieferant,bezeichnung,lagerort,etikettiert,etikett_typ,mass").order("mv_nr",{ascending:true}).range(from,from+page-1);
+    const {data,error}=await db.from(table).select("mv_nr,mv_code,art_nr_lieferant,art_nr_hersteller,lieferant,bezeichnung,lagerort,etikett_typ,mass,aktiv").order("mv_nr",{ascending:true}).range(from,from+page-1);
     if(error) throw error;
     all=all.concat(data||[]);
     if(!data||data.length<page) break; from+=page;
@@ -451,7 +451,7 @@ function classify(it){
     }
     if(!eanArt && STAMM.byHerst.has(c)){ eanArt=STAMM.byHerst.get(c)[0]; }
   }
-  if(okArt) return {status:"ok",art:okArt,note: okArt._src==="test"?"in der Test-Tabelle":""};
+  if(okArt) return {status:"ok",art:okArt,note: (okArt.aktiv===false?"⚠ archiviert – ggf. reaktivieren":(okArt._src==="test"?"in der Test-Tabelle":""))};
   if(eanArt) return {status:"ok",art:eanArt,note:"über Hersteller-/EAN-Nr. erkannt"};
   if(pruefArt) return {status:"pruef",art:pruefArt,note:pruefNote};
   // Namens-Treffer (exakt ODER enthalten) -> prüfen statt neu. Art.nr hat Vorrang: hat die Rechnung
@@ -561,7 +561,6 @@ function posInner(r,i){
   if(r.status==="ok"||r.status==="pruef"||r.status==="angelegt"){
     if(r.art.art_nr_lieferant) meta.push("Stamm-Art.nr.: "+esc(r.art.art_nr_lieferant));
     if(r.art.lagerort) meta.push("Lager: "+esc(r.art.lagerort));
-    if(r.status==="ok") meta.push(r.art.etikettiert?"etikettiert ✓":"noch nicht etikettiert");
     if(r.status==="angelegt") meta.push(TEST_MODE?"angelegt in Test-Tabelle":"neu angelegt");
   } else {
     const uniq=bestNums(r.it);
@@ -598,11 +597,7 @@ function posInner(r,i){
 
   // Etikett drucken – nur bei bestätigten Treffern (ok/angelegt), die eine MV-Nummer haben
   if((r.status==="ok"||r.status==="angelegt") && r.art && r.art.mv_code){
-    html+='<div class="posActions">'+
-      '<button class="btn secondary sm printLabelBtn" type="button">🏷️ Etikett drucken</button>'+
-      ((r.printed && !r.art.etikettiert) ? ' <button class="btn secondary sm etikettiertBtn" type="button">✓ als etikettiert markieren</button>' : '')+
-      (r.art.etikettiert ? ' <span class="small muted">etikettiert ✓</span>' : '')+
-      '</div>';
+    html+='<div class="posActions"><button class="btn secondary sm printLabelBtn" type="button">🏷️ Etikett drucken</button></div>';
   }
 
   // Bestellungs-Abgleich (Schritt C): pro passender offener Bestellung ein Block
@@ -706,8 +701,6 @@ $("positions").addEventListener("click",(e)=>{
   if(orr){ const blk=orr.closest(".order-block"); doReturnDelivery(+blk.dataset.oid, orr); return; }
   const pl=e.target.closest(".printLabelBtn");
   if(pl){ const pos=pl.closest(".pos"); doPrintLabel(+pos.dataset.i); return; }
-  const eb=e.target.closest(".etikettiertBtn");
-  if(eb){ const pos=eb.closest(".pos"); doMarkEtikettiert(+pos.dataset.i, eb); return; }
 });
 
 /* ---- Etikett direkt drucken (gleiches Layout wie das Etiketten-Tool) ---- */
@@ -742,19 +735,6 @@ async function doPrintLabel(i){
   r.printed=true;
   render();
 }
-async function doMarkEtikettiert(i, btn){
-  const r=ROWS[i]; if(!r||!r.art) return;
-  const tbl=r.art._src==="test"?"artikel_test":"artikel";
-  btn.disabled=true; btn.innerHTML='<span class="spin"></span>…';
-  try{
-    const {error}=await db.from(tbl).update({etikettiert:true}).eq("mv_nr",r.art.mv_nr);
-    if(error) throw error;
-    r.art.etikettiert=true;
-    render();
-    toast("Als etikettiert markiert: "+r.art.mv_code);
-  }catch(e){ btn.disabled=false; btn.innerHTML='✓ als etikettiert markieren'; toast("Fehlgeschlagen: "+(e.message||e),true); }
-}
-
 async function doBookDelivery(oid, inputEl, btn){
   const o=ORDERS.all.find(x=>x.id===oid); if(!o){ return; }
   const val=Number(String(inputEl?inputEl.value:"").replace(",",".").trim());
@@ -835,14 +815,13 @@ async function doInsert(i, formEl, btn){
     lagerplatz: g("lagerplatz")||null,
     warengruppe: g("warengruppe")||null,
     mass: g("mass")||null,
-    etikett_typ: g("etikett_typ")||null,
-    etikettiert: false
+    etikett_typ: g("etikett_typ")||null
   };
 
   btn.disabled=true; btn.innerHTML='<span class="spin"></span> anlegen…';
   try{
     const {data,error}=await db.from(WRITE_TABLE).insert(payload)
-      .select("mv_nr,mv_code,art_nr_lieferant,art_nr_hersteller,lieferant,bezeichnung,lagerort,etikettiert,etikett_typ,mass,created_at").single();
+      .select("mv_nr,mv_code,art_nr_lieferant,art_nr_hersteller,lieferant,bezeichnung,lagerort,etikett_typ,mass,created_at").single();
     if(error) throw error;
     indexRow(data,WRITE_SRC);              // sofort in den In-Memory-Stamm → Folgepositionen erkennen ihn
     ROWS[i].status="angelegt"; ROWS[i].art=data; ROWS[i].note="";

@@ -366,12 +366,12 @@ async function loadStamm(){
       const na = norm(r.art_nr_lieferant);
       if(na){
         if(!STAMM.byArtNr.has(na)) STAMM.byArtNr.set(na, []);
-        STAMM.byArtNr.get(na).push({ mv_code:r.mv_code, mv_nr:r.mv_nr, lieferant:r.lieferant, ek_exkl:r.ek_exkl, bezeichnung:r.bezeichnung, art_nr_lieferant:r.art_nr_lieferant, vpe_menge:r.vpe_menge, einheit:r.einheit });
+        STAMM.byArtNr.get(na).push({ mv_code:r.mv_code, mv_nr:r.mv_nr, lieferant:r.lieferant, ek_exkl:r.ek_exkl, bezeichnung:r.bezeichnung, art_nr_lieferant:r.art_nr_lieferant, vpe_menge:r.vpe_menge, einheit:r.einheit, aktiv:r.aktiv });
       }
       const kh = norm(r.art_nr_hersteller);
       if(kh && kh!=="-") STAMM.keyHerst.add(kh);
       const nn = normName(r.bezeichnung);
-      if(nn){ if(!STAMM.byName.has(nn)) STAMM.byName.set(nn, []); STAMM.byName.get(nn).push({ mv_code:r.mv_code, mv_nr:r.mv_nr, lieferant:r.lieferant, ek_exkl:r.ek_exkl, bezeichnung:r.bezeichnung, art_nr_lieferant:r.art_nr_lieferant, vpe_menge:r.vpe_menge, einheit:r.einheit }); }
+      if(nn){ if(!STAMM.byName.has(nn)) STAMM.byName.set(nn, []); STAMM.byName.get(nn).push({ mv_code:r.mv_code, mv_nr:r.mv_nr, lieferant:r.lieferant, ek_exkl:r.ek_exkl, bezeichnung:r.bezeichnung, art_nr_lieferant:r.art_nr_lieferant, vpe_menge:r.vpe_menge, einheit:r.einheit, aktiv:r.aktiv }); }
       if(r.mv_nr>STAMM.maxMv) STAMM.maxMv=r.mv_nr;
     }
     STAMM.loaded=true;
@@ -624,7 +624,7 @@ function makeMatched(c, hit){
   else if(Math.abs(stEk-chosen)>0.005) ekStatus="diff";
   const stBez = hit.bezeichnung||"";
   const bezDiff = !!(c.bezeichnung && stBez && normName(c.bezeichnung)!==normName(stBez));
-  return { c, mv_code:hit.mv_code, mv_nr:hit.mv_nr, stEk, invRaw, vpe, einheit, perVPE, perUnit, basis, ekStatus, stBez, bezDiff };
+  return { c, mv_code:hit.mv_code, mv_nr:hit.mv_nr, stEk, invRaw, vpe, einheit, perVPE, perUnit, basis, ekStatus, stBez, bezDiff, archived: hit.aktiv===false };
 }
 /* Neuen (editierbaren) Artikel aus Kandidat bauen. Bestellweg wird NIE automatisch gefüllt;
    nur etikett_typ='kein' bleibt bei Würth automatisch (Würth etikettiert selbst). */
@@ -723,7 +723,7 @@ function renderMatched(){
   if(!box) return;
   // Im Eingang nur EK-Abweichungen zeigen; "passt bereits" ausblenden. Original-Index für den EK-Knopf behalten.
   const entries = MATCHED.map((m,i)=>({m,i}))
-    .filter(e => !HIDE_OK_MATCHED || e.m.ekStatus==="diff" || e.m.ekStatus==="missing" || e.m.bezDiff);
+    .filter(e => !HIDE_OK_MATCHED || e.m.ekStatus==="diff" || e.m.ekStatus==="missing" || e.m.bezDiff || e.m.archived);
   if(!entries.length){ box.classList.add("hidden"); list.innerHTML=""; return; }
   box.classList.remove("hidden");
   list.innerHTML = entries.map(({m,i})=>{
@@ -749,15 +749,32 @@ function renderMatched(){
     }
     const bezInfo = m.bezDiff ? "<br><span class='small' style='color:var(--warn)'>Stamm-Bezeichnung: "+esc(m.stBez)+" <span class='muted'>(weicht ab)</span></span>" : "";
     const bezBtn  = m.bezDiff ? "<button class='btn ghost' data-bez='"+i+"' style='padding:4px 10px' title='Bezeichnung im Stamm auf die Rechnung ändern'>Stamm-Bezeichnung → Rechnung</button>" : "";
-    const btnArea = (buttons||bezBtn) ? (buttons+(buttons&&bezBtn?" ":"")+bezBtn) : "<span class='small muted'>—</span>";
+    const archInfo = m.archived ? "<br><span class='small' style='color:var(--warn)'>🗄 Artikel ist archiviert</span>" : "";
+    const archBtn  = m.archived ? "<button class='btn ghost' data-react-m='"+i+"' style='padding:4px 10px' title='Artikel wieder aktiv setzen'>↩ Reaktivieren</button>" : "";
+    const parts=[buttons,bezBtn,archBtn].filter(Boolean);
+    const btnArea = parts.length ? parts.join(" ") : "<span class='small muted'>—</span>";
     return "<div class='frow' style='align-items:flex-start;gap:8px'>"+
       "<b style='min-width:80px'>"+esc(m.mv_code)+"</b>"+
-      "<span class='fn' style='min-width:0'>"+esc(m.c.bezeichnung||"")+"<br><span class='small'>"+ekLine+"</span>"+bezInfo+"</span>"+
+      "<span class='fn' style='min-width:0'>"+esc(m.c.bezeichnung||"")+"<br><span class='small'>"+ekLine+"</span>"+bezInfo+archInfo+"</span>"+
       "<div style='display:flex;flex-direction:column;align-items:stretch;gap:6px;flex:0 0 auto;max-width:320px'>"+btnArea+"</div>"+
       "</div>";
   }).join("");
   list.querySelectorAll("button[data-ek]").forEach(b=>b.addEventListener("click",()=>updateEk(+b.dataset.ek, b.dataset.basis)));
   list.querySelectorAll("button[data-bez]").forEach(b=>b.addEventListener("click",()=>updateMatchedBez(+b.dataset.bez)));
+  list.querySelectorAll("button[data-react-m]").forEach(b=>b.addEventListener("click",()=>reactivateMatched(+b.dataset["reactM"])));
+}
+async function reactivateMatched(i){
+  const m=MATCHED[i]; if(!m) return;
+  try{
+    const { error } = await db.from("artikel").update({aktiv:true}).eq("mv_nr", m.mv_nr);
+    if(error) throw error;
+    m.archived=false;
+    for(const arr of STAMM.byArtNr.values()){ const e=arr.find(x=>x.mv_nr===m.mv_nr); if(e) e.aktiv=true; }
+    for(const arr of STAMM.byName.values()){ const e=arr.find(x=>x.mv_nr===m.mv_nr); if(e) e.aktiv=true; }
+    const row=STAMM.rows.find(r=>r.mv_nr===m.mv_nr); if(row) row.aktiv=true;
+    renderMatched();
+    toast("Reaktiviert: "+m.mv_code);
+  }catch(e){ toast("Reaktivieren fehlgeschlagen: "+(e.message||e), true); }
 }
 async function updateMatchedBez(i){
   const m=MATCHED[i]; if(!m) return;
@@ -1196,7 +1213,7 @@ function classifyEingang(row){
     if(na && STAMM.byArtNr.has(na)){
       const hits=STAMM.byArtNr.get(na);
       const same=hits.find(h=>normLief(h.lieferant)===tl);
-      if(same){ const m=makeMatched(c,same); if(m.ekStatus==="diff"||m.ekStatus==="missing") ekAbw++; continue; }
+      if(same){ const m=makeMatched(c,same); if(m.ekStatus==="diff"||m.ekStatus==="missing") ekAbw++; else if(m.archived) pruefen++; continue; }
       pruefen++; continue;
     }
     if(kh && kh!=="-" && STAMM.keyHerst.has(kh)) continue;

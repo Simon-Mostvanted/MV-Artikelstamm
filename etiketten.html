@@ -145,6 +145,7 @@ async function search(){
   const like="%"+q+"%";
   const { data, error } = await db.from("artikel")
     .select("mv_code,bezeichnung,mass,lagerort,art_nr_lieferant,lieferant")
+    .eq("aktiv",true)
     .or(`mv_code.ilike.${like},bezeichnung.ilike.${like},art_nr_lieferant.ilike.${like}`)
     .order("mv_nr",{ascending:true}).limit(2000);
   if(error){ toast("Suchfehler: "+error.message,true); return; }
