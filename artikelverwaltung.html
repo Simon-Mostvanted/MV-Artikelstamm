@@ -166,6 +166,7 @@
       <summary style="cursor:pointer;font-weight:600">➕ Artikel manuell anlegen</summary>
       <div style="margin-top:12px;display:grid;grid-template-columns:1fr 1fr;gap:10px">
         <div style="grid-column:1/-1"><label>Bezeichnung *</label><input id="m_bez" type="text" placeholder="Pflichtfeld"></div>
+        <div style="grid-column:1/-1"><label>Interne Bezeichnung / Suchbegriffe</label><input id="m_alias" type="text" placeholder="z. B. C-Schiene (macht den Artikel leichter auffindbar)"></div>
         <div><label>Lieferant</label><input id="m_lief" type="text"></div>
         <div><label>Art.nr. Lieferant</label><input id="m_anrl" type="text"></div>
         <div><label>Hersteller</label><input id="m_herst" type="text"></div>
@@ -520,19 +521,21 @@ const HEADER_ALIASES = {
   farbe:["farbe","color"], einheit:["einheit","vpe","verpackungseinheit"], vpe_menge:["vpe-größe","vpe größe","vpe-menge","vpe menge","verpackungsmenge","gebindemenge"],
   ek_exkl:["ek (exkl.)","ek","einkaufspreis","preis","ek exkl","ek netto"],
   vk_inkl:["vk (inkl.)","vk","verkaufspreis"], gewicht_kg:["gewicht in kg","gewicht","gewicht kg"],
-  bestell_mail:["bestell-mail","bestellmail","email"], produktlink:["produktlink","link","url"]
+  bestell_mail:["bestell-mail","bestellmail","email"], produktlink:["produktlink","link","url"],
+  alias:["alias","interne bezeichnung","interne-bezeichnung","suchbegriffe","suchbegriff","stichworte"]
 };
 function mapHeader(h){ const n=norm(h); for(const [field,al] of Object.entries(HEADER_ALIASES)){ if(al.some(x=>norm(x)===n)) return field; } return null; }
 $("xlsxBtn").addEventListener("click", ()=>$("xlsxInput").click());
 $("xlsxInput").addEventListener("change", e=>{ const f=e.target.files[0]; if(f) readXlsx(f); e.target.value=""; });
 
 /* ---------- Manuelle Anlage ---------- */
-const MANUAL_FIELDS = ["m_bez","m_lief","m_anrl","m_herst","m_anrh","m_wg","m_lo","m_lp","m_mass","m_farbe","m_einheit","m_vpe_menge","m_ek","m_vk","m_bweg","m_mail","m_link"];
+const MANUAL_FIELDS = ["m_bez","m_alias","m_lief","m_anrl","m_herst","m_anrh","m_wg","m_lo","m_lp","m_mass","m_farbe","m_einheit","m_vpe_menge","m_ek","m_vk","m_bweg","m_mail","m_link"];
 $("manualAddBtn").addEventListener("click", ()=>{
   const bez = clean($("m_bez").value);
   if(!bez){ toast("Bitte eine Bezeichnung eingeben.", true); $("m_bez").focus(); return; }
   CANDIDATES.push({
     bezeichnung: bez,
+    alias: clean($("m_alias").value),
     art_nr_lieferant: clean($("m_anrl").value),
     art_nr_hersteller: clean($("m_anrh").value),
     hersteller: clean($("m_herst").value),
@@ -695,7 +698,7 @@ function makeNewRow(c){
   const seen=new Set(), nameClash=[];
   for(const x of clash){ if(!seen.has(x.mv_code)){ seen.add(x.mv_code); nameClash.push(x); } }
   return {
-    bezeichnung:c.bezeichnung, lieferant:c.lieferant,
+    bezeichnung:c.bezeichnung, alias:(c.alias||""), lieferant:c.lieferant,
     art_nr_lieferant:c.art_nr_lieferant, art_nr_hersteller:c.art_nr_hersteller,
     hersteller:c.hersteller, warengruppe:c.warengruppe||"", lagerort:c.lagerort||"", lagerplatz:c.lagerplatz||"",
     mass:c.mass, farbe:c.farbe, einheit:(c.einheit||"Stück"), vpe_menge:(c.vpe_menge!=null&&c.vpe_menge!==""?c.vpe_menge:1),
@@ -990,7 +993,7 @@ function renderSummary(){
     '<div class="stat"><b>'+CANDIDATES.length+'</b><span class="small muted">erfasst gesamt</span></div>';
 }
 const COLS = [
-  ["bezeichnung","Bezeichnung","w-lg"],["lieferant","Lieferant",""],
+  ["bezeichnung","Bezeichnung","w-lg"],["alias","Interne Bez.",""],["lieferant","Lieferant",""],
   ["art_nr_lieferant","Art.nr.Lief.","w-sm"],["art_nr_hersteller","Art.nr.Herst./EAN","w-sm"],
   ["hersteller","Hersteller",""],["warengruppe","Warengruppe *",""],
   ["lagerort","Lagerort *",""],["lagerplatz","Lagerplatz",""],
@@ -1055,7 +1058,7 @@ $("commitBtn").addEventListener("click", async ()=>{
   const payload = NEWROWS.map(r=>{
     const o={};
     const put=(k,v)=>{ if(v!==""&&v!=null) o[k]=v; };
-    put("bezeichnung",r.bezeichnung); put("lieferant",r.lieferant);
+    put("bezeichnung",r.bezeichnung); put("alias",r.alias); put("lieferant",r.lieferant);
     put("art_nr_lieferant",r.art_nr_lieferant); put("art_nr_hersteller",r.art_nr_hersteller);
     put("hersteller",r.hersteller); put("warengruppe",r.warengruppe);
     put("lagerort",r.lagerort); put("lagerplatz",r.lagerplatz);
