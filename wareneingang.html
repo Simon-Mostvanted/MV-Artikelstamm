@@ -195,6 +195,8 @@ const $=(id)=>document.getElementById(id);
 function esc(v){return String(v==null?"":v).replace(/[&<>"]/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[m]))}
 function toast(m,bad){const t=document.createElement("div");t.className="toast"+(bad?" bad":"");t.textContent=m;document.body.appendChild(t);setTimeout(()=>t.remove(),bad?5200:2600)}
 function norm(v){return String(v==null?"":v).replace(/\s+/g," ").trim().toLowerCase()}
+/* Nummern-Vergleich (Art.nr/EAN): Leerzeichen und Trenner (. - _ /) ignorieren, damit z. B. "058701 120" = "058701120" (Würth). */
+function normArt(v){return norm(v).replace(/[\s.\-_/]/g,"")}
 function clean(v){let s=String(v==null?"":v).replace(/\s+/g," ").trim();return (s==="k.A."||s==="-")?"":s}
 function normLief(v){let s=norm(v).replace(/[.,&/]/g," ");s=s.replace(/\b(gmbh|mbh|co|kg|kgaa|ag|ohg|ug|se|gbr|ek|e\s+k|inh|inhaber|fa|firma)\b/g," ");return s.replace(/\s+/g," ").trim()}
 function normName(s){return String(s==null?"":s).toLowerCase().replace(/[^a-z0-9äöüß]+/g,"")}
@@ -225,9 +227,9 @@ $("toggleKey").addEventListener("click",()=>{const i=$("apiKey");i.type=i.type==
 let STAMM={byArtNr:new Map(),byHerst:new Map(),byName:new Map(),liefCounts:{},loaded:false};
 function indexRow(r,source){
   r._src=source; // 'echt' | 'test'
-  const na=norm(r.art_nr_lieferant);
+  const na=normArt(r.art_nr_lieferant);
   if(na){ if(!STAMM.byArtNr.has(na)) STAMM.byArtNr.set(na,[]); STAMM.byArtNr.get(na).push(r); }
-  const kh=norm(r.art_nr_hersteller);
+  const kh=normArt(r.art_nr_hersteller);
   if(kh&&kh!=="-"){ if(!STAMM.byHerst.has(kh)) STAMM.byHerst.set(kh,[]); STAMM.byHerst.get(kh).push(r); }
   const nn=normName(r.bezeichnung);
   if(nn){ if(!STAMM.byName.has(nn)) STAMM.byName.set(nn,[]); STAMM.byName.get(nn).push(r); }
@@ -396,7 +398,7 @@ function indexOrders(){
   for(const o of ORDERS.all){
     o._nl=normLief(o.lieferant);
     if(o.mv_nr!=null){ const k=Number(o.mv_nr); if(!ORDERS.byMv.has(k)) ORDERS.byMv.set(k,[]); ORDERS.byMv.get(k).push(o); }
-    const na=norm(o.art_nr);
+    const na=normArt(o.art_nr);
     if(na && na.length>=3 && na!=="-"){ if(!ORDERS.byArt.has(na)) ORDERS.byArt.set(na,[]); ORDERS.byArt.get(na).push(o); }
   }
 }
@@ -422,7 +424,7 @@ function findOrdersForRow(row){
   const consider=(o)=>{ if(!o) return; if(o.lieferstatus!=="offen"&&o.lieferstatus!=="teilweise") return; if(o._nl!==senderNl) return; out.set(o.id,o); };
   if(row.art && row.art.mv_nr!=null){ (ORDERS.byMv.get(Number(row.art.mv_nr))||[]).forEach(consider); }
   for(const n of bestNums(row.it)){
-    const na=norm(n);
+    const na=normArt(n);
     (ORDERS.byArt.get(na)||[]).forEach(consider);
     const asInt=parseInt(n,10);
     if(!isNaN(asInt)) (ORDERS.byMv.get(asInt)||[]).forEach(consider);
@@ -440,7 +442,7 @@ function classify(it){
   const senderTl=normLief(SENDER);
   // Kandidaten: Hauptnummer + alle 'nummern', normalisiert, ab 3 Zeichen
   const cands=[]; const seen=new Set();
-  const add=(x)=>{ const n=norm(x); if(n && n.length>=3 && n!=="-" && !seen.has(n)){ seen.add(n); cands.push(n); } };
+  const add=(x)=>{ const n=normArt(x); if(n && n.length>=3 && n!=="-" && !seen.has(n)){ seen.add(n); cands.push(n); } };
   add(it.artikelNummer); (it.nummern||[]).forEach(add);
   let okArt=null, eanArt=null, pruefArt=null, pruefNote="";
   for(const c of cands){
@@ -459,7 +461,7 @@ function classify(it){
   // Nummern (die oben NICHT im Stamm gefunden wurden), zählen nur namensgleiche Stamm-Artikel OHNE
   // eigene Art.nr. Ein Treffer mit abweichender Art.nr ist ein anderer Artikel -> kein Dublett.
   const nHits = nameHitsFor(normName(it.bezeichnung));
-  const nameHits = cands.length ? nHits.filter(h=>!norm(h.art_nr_lieferant)) : nHits;
+  const nameHits = cands.length ? nHits.filter(h=>!normArt(h.art_nr_lieferant)) : nHits;
   if(nameHits.length) return {status:"pruef",art:nameHits[0],note:"über Bezeichnung erkannt: "+nameHits.slice(0,3).map(h=>h.mv_code).join(", ")};
   return {status:"neu",art:null,note: cands.length?"":"keine Nummer erkannt"};
 }
@@ -801,7 +803,7 @@ async function doInsert(i, formEl, btn){
   const art_nr_lieferant=g("art_nr_lieferant");
 
   // Dedup-Recheck direkt vor dem Insert: gleicher Lieferant + gleiche Art.nr. → blockieren
-  const na=norm(art_nr_lieferant), senderTl=normLief(lieferant);
+  const na=normArt(art_nr_lieferant), senderTl=normLief(lieferant);
   if(na && STAMM.byArtNr.has(na)){
     const dup=STAMM.byArtNr.get(na).find(h=>normLief(h.lieferant)===senderTl);
     if(dup){ toast("Existiert schon: "+dup.mv_code+(dup._src==="test"?" (Test)":"")+" – nicht doppelt angelegt.",true); return; }

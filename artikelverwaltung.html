@@ -311,6 +311,8 @@ const $ = (id) => document.getElementById(id);
 function toast(msg, bad){ const t=document.createElement("div"); t.className="toast"+(bad?" bad":""); t.textContent=msg; document.body.appendChild(t); setTimeout(()=>t.remove(), bad?5200:2600); }
 function esc(v){ return String(v==null?"":v).replace(/[&<>"]/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[m])); }
 function norm(v){ return String(v==null?"":v).replace(/\s+/g," ").trim().toLowerCase(); }
+/* Artikelnummer-Vergleich: Leerzeichen und Trenner (. - _ /) ignorieren, damit z. B. "058701 120" = "058701120" (Würth). */
+function normArt(v){ return norm(v).replace(/[\s.\-_/]/g,""); }
 function clean(v){ let s=String(v==null?"":v).replace(/\s+/g," ").trim(); return (s==="k.A."||s==="-")?"":s; }
 function parseNum(v){ if(v==null) return null; let s=String(v).trim(); if(s==="") return null;
   s=s.replace(/[^\d.,-]/g,""); if(s==="") return null;
@@ -364,7 +366,7 @@ async function loadStamm(){
     STAMM.rows = all;
     STAMM.byArtNr = new Map(); STAMM.keyHerst = new Set(); STAMM.byName = new Map(); STAMM.maxMv=0;
     for(const r of all){
-      const na = norm(r.art_nr_lieferant);
+      const na = normArt(r.art_nr_lieferant);
       if(na){
         if(!STAMM.byArtNr.has(na)) STAMM.byArtNr.set(na, []);
         STAMM.byArtNr.get(na).push({ mv_code:r.mv_code, mv_nr:r.mv_nr, lieferant:r.lieferant, ek_exkl:r.ek_exkl, bezeichnung:r.bezeichnung, art_nr_lieferant:r.art_nr_lieferant, vpe_menge:r.vpe_menge, einheit:r.einheit, aktiv:r.aktiv });
@@ -693,9 +695,9 @@ function makeNewRow(c){
   const w=isWuerth(c.lieferant);
   // Namens-Konflikt: existiert die exakt gleiche Bezeichnung schon im Stamm (mit anderer Art.nr)?
   // Dann ist DIES ein eigener Artikel (Art.nr = Wahrheit) und der Stamm-Artikel evtl. falsch benannt.
-  const nn=normName(c.bezeichnung), na=norm(c.art_nr_lieferant);
+  const nn=normName(c.bezeichnung), na=normArt(c.art_nr_lieferant);
   const clash = (STAMM.byName.has(nn) ? STAMM.byName.get(nn) : [])
-    .filter(h => norm(h.art_nr_lieferant)!==na)
+    .filter(h => normArt(h.art_nr_lieferant)!==na)
     .map(h => ({mv_code:h.mv_code, mv_nr:h.mv_nr, art:h.art_nr_lieferant||""}));
   const seen=new Set(), nameClash=[];
   for(const x of clash){ if(!seen.has(x.mv_code)){ seen.add(x.mv_code); nameClash.push(x); } }
@@ -739,7 +741,7 @@ function nameHitsFor(nn){
 function nameDupHits(nn, na){
   const hits = nameHitsFor(nn);
   if(!na) return hits;                       // Rechnung ohne Art.nr -> Name entscheidet (wie bisher)
-  return hits.filter(h => { const hn = norm(h.art_nr_lieferant); return !hn || hn===na; });
+  return hits.filter(h => { const hn = normArt(h.art_nr_lieferant); return !hn || hn===na; });
 }
 function runMatch(){
   if(!STAMM.loaded){ toast("Bitte zuerst den Stamm laden (oben).", true); return; }
@@ -747,7 +749,7 @@ function runMatch(){
   const seenBatch=new Set();
   for(const c of CANDIDATES){
     if(!c.bezeichnung){ SKIPPED.push({c,grund:"keine Bezeichnung"}); continue; }
-    const na = norm(c.art_nr_lieferant);
+    const na = normArt(c.art_nr_lieferant);
     const tl = normLief(c.lieferant);
     const kh = norm(c.art_nr_hersteller);
     // 1) gleiche Art.nr.Lieferant im Stamm?
@@ -896,7 +898,7 @@ function renderReview(){
       const stEk = h.ek_exkl!=null ? Number(h.ek_exkl) : null;
       const liefDiff = normLief(h.lieferant) !== normLief(c.lieferant);
       const bezDiff  = normName(h.bezeichnung) !== normName(c.bezeichnung);
-      const invNa=norm(c.art_nr_lieferant), hitNa=norm(h.art_nr_lieferant);
+      const invNa=normArt(c.art_nr_lieferant), hitNa=normArt(h.art_nr_lieferant);
       const artNrCue = !hitNa ? " <span class='muted'>(keine Nr. im Stamm)</span>"
         : (invNa && hitNa===invNa ? " <span style='color:var(--ok)'>✓ gleiche Nr.</span>"
         : (invNa ? " <span style='color:var(--warn)'>(andere Nr. als Rechnung)</span>" : ""));
@@ -961,7 +963,7 @@ async function reviewUpdateStamm(i,j,field){
     h[field]=val;
     // 3b: Lieferant angeglichen und Art.nr. ist eindeutig gleich -> derselbe Artikel, ohne extra "EK abgleichen"-Klick.
     if(field==="lieferant"){
-      const invNa=norm(rv.c.art_nr_lieferant), hitNa=norm(h.art_nr_lieferant);
+      const invNa=normArt(rv.c.art_nr_lieferant), hitNa=normArt(h.art_nr_lieferant);
       if(invNa && hitNa===invNa){
         const invEk=(rv.c.ek_exkl!=null && rv.c.ek_exkl!=="")?Number(rv.c.ek_exkl):null;
         const stEk=(h.ek_exkl!=null)?Number(h.ek_exkl):null;
@@ -1299,7 +1301,7 @@ function classifyEingang(row){
   let neu=0, pruefen=0, ekAbw=0;
   const cands = eingangToCandidates(row);
   for(const c of cands){
-    const na=norm(c.art_nr_lieferant), tl=normLief(c.lieferant), kh=norm(c.art_nr_hersteller);
+    const na=normArt(c.art_nr_lieferant), tl=normLief(c.lieferant), kh=norm(c.art_nr_hersteller);
     if(na && STAMM.byArtNr.has(na)){
       const hits=STAMM.byArtNr.get(na);
       const same=hits.find(h=>normLief(h.lieferant)===tl);
@@ -1537,9 +1539,9 @@ function openStammFix(mvNr){
 }
 /* Namens-Konflikt anhand des AKTUELLEN Stamms neu bestimmen (berücksichtigt Umbenennungen). */
 function computeNameClash(bez, artnr){
-  const nn=normName(bez), na=norm(artnr), seen=new Set(), out=[];
+  const nn=normName(bez), na=normArt(artnr), seen=new Set(), out=[];
   for(const h of STAMM.rows){
-    if(normName(h.bezeichnung)===nn && norm(h.art_nr_lieferant)!==na && !seen.has(h.mv_code)){
+    if(normName(h.bezeichnung)===nn && normArt(h.art_nr_lieferant)!==na && !seen.has(h.mv_code)){
       seen.add(h.mv_code); out.push({mv_code:h.mv_code, mv_nr:h.mv_nr, art:h.art_nr_lieferant||""});
     }
   }
