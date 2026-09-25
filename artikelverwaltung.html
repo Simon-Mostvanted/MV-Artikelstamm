@@ -1021,6 +1021,7 @@ $("commitBtn").addEventListener("click", async ()=>{
     toast(inserted.length+" Artikel angelegt – MV-Nummern vergeben ✓");
     await loadStamm(); // Stamm aktualisieren (nächste Nummer etc.)
     NEWROWS=[]; renderSummary(); renderNewTable(); updateCommitUI(); // angelegte Zeilen aus der Anlege-Tabelle entfernen
+    checkEingangComplete(); // 3a: aus einer Rechnung heraus angelegt -> zurück zur Liste, wenn nichts mehr offen
   }catch(e){
     $("commitInfo").textContent="";
     const m=(e.message||String(e));
