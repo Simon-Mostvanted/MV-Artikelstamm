@@ -393,6 +393,7 @@ const EXTRACT_SCHEMA = {
   type:"object",
   properties:{
     sender:{type:"string",description:"Rechnungssteller/Lieferant, sonst 'k.A.'"},
+    rabattGesamtNetto:{type:"number",description:"Nur wenn ein Rabatt/Nachlass als EIGENE Position oder als Gesamt-Rabatt auf die ganze Rechnung ausgewiesen ist und NICHT bereits in den einzelnen positionswertNetto abgezogen wurde: der gesamte Rabattbetrag in EURO, NETTO (ohne MwSt), als POSITIVE Zahl (Betrag, der abgezogen wird). Sonst 0. Positionsbezogene Rabatte, die du schon in positionswertNetto berücksichtigt hast, hier NICHT nochmal angeben."},
     artikel:{type:"array",items:{type:"object",properties:{
       artikelNummer:{type:"string",description:"Artikel-/Bestellnummer des Lieferanten, sonst 'k.A.'"},
       bezeichnung:{type:"string",description:"Vollständige Artikelbezeichnung. Übernimm ALLE Beschreibungszeilen des Postens in gedruckter Reihenfolge – steht z. B. zusätzlich zum Klartext-Namen eine Kurz-/Typbezeichnung (Code mit Bindestrichen, z. B. 'SCHAB-KST-SET-2TLG'), hänge sie mit einem Leerzeichen an. Nichts weglassen."},
@@ -419,7 +420,7 @@ PREIS PRO EINHEIT (sehr wichtig): Fülle für JEDE Position zusätzlich menge un
 - positionswertNetto = Gesamtbetrag DIESER Zeile in Euro, NETTO (ohne MwSt) und NACH Abzug von Positionsrabatten.
 - Ist der Einzelpreis „pro 100" / „pro 1000" / je Preiseinheit (PE) angegeben, verlasse dich NICHT auf den Einzelpreis – gib menge und positionswertNetto korrekt an.
 - Weist die Rechnung Bruttopreise inkl. MwSt aus (häufig bei Kleinmengen-/Endkundenrechnungen), rechne positionswertNetto auf netto zurück (Betrag ÷ (1 + MwSt-Satz)).
-- Ein Rabatt, der als EIGENE Position ausgewiesen ist, bleibt (wie andere Nicht-Artikel) unberücksichtigt – erfasse ihn NICHT als Artikel.
+- Ein Rabatt, der als EIGENE Position bzw. als Gesamt-Rabatt der Rechnung ausgewiesen ist, wird NICHT als Artikel erfasst – gib seinen Gesamtbetrag stattdessen in rabattGesamtNetto (netto, positive Zahl) an, damit er anteilig auf die Positionen verrechnet werden kann. Ist der Rabatt schon je Position in positionswertNetto abgezogen, lasse rabattGesamtNetto = 0.
 WICHTIG zur bezeichnung: Übernimm den KOMPLETTEN Artikeltext. Viele Rechnungen (z. B. Würth) haben pro Posten MEHRERE Beschreibungszeilen – einen Klartext-Namen UND zusätzlich eine Kurz-/Typbezeichnung (oft ein Code mit Bindestrichen, z. B. 'SCHAB-KST-SET-2TLG'). Übernimm dann BEIDE in das eine Feld bezeichnung (Klartext zuerst, dann der Code), getrennt durch ein Leerzeichen. Lass keine Zeile weg.`;
   const system = `Du bist ein hochpräziser Assistent für Rechnungsdaten-Extraktion. Extrahiere ausschließlich echte Waren/Kern-Dienstleistungen; niemals Gebühren, Pauschalen, Rabatte oder Gutschriften. Antworte ausschließlich mit dem geforderten JSON.`;
   const body = { model:CLAUDE_MODEL, max_tokens:32000, system,
@@ -472,11 +473,11 @@ async function handlePdfs(files){
       const b64 = await readFileAsBase64(f);
       const data = await extractInvoice(b64, apiKey);
       const lief = clean(data.sender);
-      let n=0;
+      const fileCands=[];
       for(const a of (data.artikel||[])){
         const bez=clean(a.bezeichnung); if(!bez) continue;
         const u=invUnitFromRaw(a);
-        CANDIDATES.push({
+        fileCands.push({
           bezeichnung:bez,
           art_nr_lieferant:clean(a.artikelNummer),
           art_nr_hersteller:clean(a.herstellerNummer),
@@ -487,8 +488,10 @@ async function handlePdfs(files){
           menge:u.menge, positionswert_netto:u.positionswert_netto, einzelpreis:u.einzelpreis, ek_berechnet:u.ek_berechnet,
           quelle:f.name
         });
-        n++;
       }
+      applyGlobalRabatt(fileCands, data.rabattGesamtNetto);
+      for(const c of fileCands) CANDIDATES.push(c);
+      const n=fileCands.length;
       setFileRow(id,true, n+" Artikel erkannt");
     }catch(e){ setFileRow(id,false, e.message||String(e)); }
   }
@@ -628,6 +631,23 @@ function invUnitFromRaw(a){
   }
   return { ek_exkl: einzel, menge:(menge!=null?menge:null), positionswert_netto:(pw!=null?pw:null), einzelpreis: einzel, ek_berechnet:false };
 }
+/* Paket 1: Als eigene Position/gesamt ausgewiesener Rabatt wird proportional zum Netto-Wert auf die
+   berechneten Positionen verteilt und der EK entsprechend gesenkt. Mutiert die übergebenen Kandidaten. */
+function applyGlobalRabatt(cands, rabatt){
+  const r = parseNum(rabatt);
+  if(r==null || r<=0) return cands;
+  const sum = cands.reduce((s,c)=> s + ((c.ek_berechnet && c.positionswert_netto>0) ? c.positionswert_netto : 0), 0);
+  if(sum<=0) return cands;
+  const factor = Math.max(0, 1 - r/sum);
+  for(const c of cands){
+    if(c.ek_berechnet && c.positionswert_netto>0 && c.menge>0){
+      c.positionswert_netto = c.positionswert_netto * factor;
+      c.ek_exkl = c.positionswert_netto / c.menge;
+      c.rabatt_anteilig = true;
+    }
+  }
+  return cands;
+}
 function makeMatched(c, hit){
   const invRaw = (c.ek_exkl!=null && c.ek_exkl!=="") ? Number(c.ek_exkl) : null; // Rechnungspreis wie extrahiert
   const stEk   = (hit.ek_exkl!=null) ? Number(hit.ek_exkl) : null;               // Stamm-EK pro Einheit
@@ -650,7 +670,7 @@ function makeMatched(c, hit){
   const stBez = hit.bezeichnung||"";
   const bezDiff = !!(c.bezeichnung && stBez && normName(c.bezeichnung)!==normName(stBez));
   return { c, mv_code:hit.mv_code, mv_nr:hit.mv_nr, stEk, invRaw, vpe, einheit, perVPE, perUnit, basis, ekStatus, stBez, bezDiff, archived: hit.aktiv===false,
-    berechnet, menge:c.menge, positionswert_netto:c.positionswert_netto, einzelpreis:c.einzelpreis };
+    berechnet, menge:c.menge, positionswert_netto:c.positionswert_netto, einzelpreis:c.einzelpreis, rabatt_anteilig:!!c.rabatt_anteilig };
 }
 /* Neuen (editierbaren) Artikel aus Kandidat bauen. Bestellweg wird NIE automatisch gefüllt;
    nur etikett_typ='kein' bleibt bei Würth automatisch (Würth etikettiert selbst). */
@@ -770,7 +790,7 @@ function renderMatched(){
         buttons=bV+" "+bE;
       } else {
         const calcInfo = (m.berechnet && m.positionswert_netto!=null && m.menge!=null)
-          ? " <span class='muted'>("+fmtEk(m.positionswert_netto)+" netto ÷ "+m.menge+" "+eh+")</span>" : "";
+          ? " <span class='muted'>("+fmtEk(m.positionswert_netto)+" netto ÷ "+m.menge+" "+eh+(m.rabatt_anteilig?", inkl. anteiligem Rabatt":"")+")</span>" : "";
         ekLine="<span style='color:var(--warn)'>"+st+" · Rechnung <b>"+fmtEk(m.perUnit)+"</b> pro "+eh+calcInfo+"</span>";
         buttons="<button class='btn' data-ek='"+i+"' data-basis='einheit' style='padding:4px 12px' title='Speichert den EK pro "+eh+"'>EK auf <b>"+fmtEk(m.perUnit)+"</b>/"+eh+" setzen</button>";
       }
@@ -1241,7 +1261,7 @@ $("eingangBackBtn").addEventListener("click", ()=>{ setMode("eingang"); loadEing
 /* ---------- Eingang: automatisch ausgelesene Rechnungen ---------- */
 function eingangToCandidates(row){
   const lief = clean(row.sender);
-  return (row.positionen||[]).map(a=>{
+  const cands = (row.positionen||[]).map(a=>{
     const u=invUnitFromRaw(a);
     return {
       bezeichnung: clean(a.bezeichnung),
@@ -1255,6 +1275,8 @@ function eingangToCandidates(row){
       quelle: row.datei_name||""
     };
   }).filter(c=>c.bezeichnung);
+  applyGlobalRabatt(cands, row.rabatt_gesamt_netto);
+  return cands;
 }
 // Zählt je Rechnung die zu pflegenden Positionen (read-only, mutiert keine Globals)
 function classifyEingang(row){
