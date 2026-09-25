@@ -255,9 +255,10 @@
     <div class="card">
       <h2>Artikel bearbeiten</h2>
       <div class="sub">Artikel suchen, auswählen und alle Felder anpassen. Die MV-Nummer ist fest und kann nicht geändert werden.</div>
-      <div class="row" style="margin-top:10px">
+      <div class="row" style="margin-top:10px;align-items:center">
         <input id="editSearch" type="text" placeholder="Suche: MV-Code, Bezeichnung, Art.nr. oder Lieferant …" style="flex:1;min-width:240px">
         <button class="btn" id="editSearchBtn" type="button">Suchen</button>
+        <label style="display:flex;align-items:center;gap:6px;font-size:12px;white-space:nowrap"><input type="checkbox" id="editShowArchived" style="width:auto"> auch archivierte</label>
       </div>
       <div id="editResults" style="margin-top:10px;display:flex;flex-direction:column;gap:5px;max-height:55vh;overflow-y:auto"></div>
     </div>
@@ -1309,7 +1310,7 @@ const EDIT_FIELDS = [
   ["einheit","Einheit","text"], ["vpe_menge","VPE-Größe","num"],
   ["ek_exkl","EK (exkl., pro Einheit)","num"], ["vk_inkl","VK (inkl.)","num"], ["gewicht_kg","Gewicht (kg)","num"],
   ["bestellweg","Bestellweg","text"], ["bestell_mail","Bestell-Mail","text"], ["produktlink","Produktlink","text","full"],
-  ["etikett_typ","Etikett-Typ","select"], ["etikettiert","Etikettiert","bool"]
+  ["aktiv","Status","aktivsel"]
 ];
 let EDIT_CURRENT = null, EDIT_HITS = {};
 
@@ -1350,16 +1351,37 @@ function searchStamm(q){
 function editSearch(){
   const q=$("editSearch").value.trim(); if(!q){ $("editResults").innerHTML=""; return; }
   if(!STAMM.loaded){ toast("Bitte zuerst den Stamm laden (oben).", true); return; }
-  const matches=searchStamm(q);
-  if(!matches.length){ $("editResults").innerHTML='<div class="small muted">Keine Treffer.</div>'; return; }
-  const top=matches.slice(0,200);   // Datensätze liegen komplett im Speicher (loadStamm select *)
+  const showArch = $("editShowArchived") && $("editShowArchived").checked;
+  let matches=searchStamm(q);
+  if(!showArch) matches=matches.filter(a=>a.aktiv!==false);   // archivierte standardmäßig ausblenden
+  if(!matches.length){ $("editResults").innerHTML='<div class="small muted">Keine Treffer.'+(!showArch?' (Archivierte sind ausgeblendet.)':'')+'</div>'; return; }
+  const top=matches.slice(0,200);
   EDIT_HITS={};
   $("editResults").innerHTML = top.map(a=>{ EDIT_HITS[a.mv_code]=a;
-    return `<div class="frow"><b style="min-width:80px">${esc(a.mv_code)}</b><span class="fn">${esc(a.bezeichnung||"")} <span class="muted">· ${esc(a.lieferant||"")}${a.hersteller?" · "+esc(a.hersteller):""}${a.mass?" · "+esc(a.mass):""}${a.art_nr_lieferant?" · "+esc(a.art_nr_lieferant):""}</span></span><button class="btn" data-edit="${esc(a.mv_code)}" style="padding:4px 12px">bearbeiten</button></div>`;
+    const arch = a.aktiv===false;
+    const badge = arch ? " <span class='pill dup'>archiviert</span>" : "";
+    const actBtn = arch
+      ? `<button class="btn ghost" data-react="${esc(a.mv_code)}" style="padding:4px 10px" title="Wieder aktiv setzen">↩ Reaktivieren</button>`
+      : `<button class="btn ghost" data-arch="${esc(a.mv_code)}" style="padding:4px 10px" title="Artikel archivieren (nicht löschen)">🗄 Archivieren</button>`;
+    return `<div class="frow"${arch?' style="opacity:.6"':''}><b style="min-width:80px">${esc(a.mv_code)}</b><span class="fn">${esc(a.bezeichnung||"")}${badge} <span class="muted">· ${esc(a.lieferant||"")}${a.hersteller?" · "+esc(a.hersteller):""}${a.mass?" · "+esc(a.mass):""}${a.art_nr_lieferant?" · "+esc(a.art_nr_lieferant):""}</span></span>${actBtn}<button class="btn" data-edit="${esc(a.mv_code)}" style="padding:4px 12px">bearbeiten</button></div>`;
   }).join("");
   $("editResults").querySelectorAll("button[data-edit]").forEach(b=>b.addEventListener("click",()=>loadEditForm(EDIT_HITS[b.dataset.edit])));
+  $("editResults").querySelectorAll("button[data-arch]").forEach(b=>b.addEventListener("click",()=>setAktiv(EDIT_HITS[b.dataset.arch], false)));
+  $("editResults").querySelectorAll("button[data-react]").forEach(b=>b.addEventListener("click",()=>setAktiv(EDIT_HITS[b.dataset.react], true)));
   if(matches.length>top.length) $("editResults").insertAdjacentHTML("beforeend", '<div class="small muted" style="padding:6px 2px">… '+(matches.length-top.length)+' weitere Treffer – Suche verfeinern.</div>');
 }
+async function setAktiv(a, aktiv){
+  if(!a) return;
+  if(!aktiv && !confirm('Artikel '+a.mv_code+' archivieren?\nEr bleibt erhalten, wird aber standardmäßig ausgeblendet und nicht mehr angeboten.')) return;
+  try{
+    const { error } = await db.from("artikel").update({aktiv}).eq("id", a.id);
+    if(error) throw error;
+    a.aktiv=aktiv;   // In-Memory-Stamm mitziehen (a ist die STAMM.rows-Referenz)
+    toast(aktiv?("Reaktiviert: "+a.mv_code):("Archiviert: "+a.mv_code));
+    editSearch();
+  }catch(e){ toast("Fehler: "+(e.message||e), true); }
+}
+$("editShowArchived").addEventListener("change", editSearch);
 function loadEditForm(a){
   EDIT_CURRENT = a;
   $("editSaveInfo").innerHTML = "";
@@ -1368,6 +1390,7 @@ function loadEditForm(a){
     const col=f[0], label=f[1], type=f[2], full=f[3]==="full";
     const wrap = (inner)=>`<div${full?" style=\"grid-column:1/-1\"":""}><label>${label}</label>${inner}</div>`;
     if(type==="list") return wrap(listSelectHtml(col, a[col], 'id="ef_'+col+'"'));
+    if(type==="aktivsel") return wrap(`<select id="ef_aktiv"><option value="true" ${a.aktiv!==false?"selected":""}>Aktiv</option><option value="false" ${a.aktiv===false?"selected":""}>Archiviert</option></select>`);
     if(type==="select") return wrap(`<select id="ef_${col}">`+["","Regal","Artikel","kein"].map(o=>`<option ${a[col]===o?"selected":""} value="${o}">${o||"—"}</option>`).join("")+`</select>`);
     if(type==="bool") return wrap(`<select id="ef_${col}"><option value="false" ${!a[col]?"selected":""}>nein</option><option value="true" ${a[col]?"selected":""}>ja</option></select>`);
     return wrap(`<input id="ef_${col}" type="text" value="${esc(a[col]==null?"":a[col])}">`);
@@ -1423,6 +1446,7 @@ $("editSaveBtn").addEventListener("click", async ()=>{
   const payload={};
   EDIT_FIELDS.forEach(f=>{ const col=f[0], type=f[2], el=$("ef_"+col); if(!el) return;
     if(type==="num") payload[col]=parseNum(el.value);
+    else if(type==="aktivsel") payload[col]=(el.value==="true");
     else if(type==="bool") payload[col]=(el.value==="true");
     else if(type==="select") payload[col]=el.value||null;
     else if(type==="list"){ const v=(el.value==="__new__"?"":el.value).trim(); payload[col]= v===""?null:v; }
