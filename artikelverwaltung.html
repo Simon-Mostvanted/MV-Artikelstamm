@@ -171,9 +171,9 @@
         <div><label>Art.nr. Lieferant</label><input id="m_anrl" type="text"></div>
         <div><label>Hersteller</label><input id="m_herst" type="text"></div>
         <div><label>Art.nr. Hersteller / EAN</label><input id="m_anrh" type="text"></div>
-        <div><label>Warengruppe</label><input id="m_wg" type="text"></div>
-        <div><label>Lagerort</label><input id="m_lo" type="text"></div>
-        <div><label>Lagerplatz</label><input id="m_lp" type="text"></div>
+        <div><label>Warengruppe</label><select id="m_wg" data-listkat="warengruppe"><option value="">— (leer)</option></select></div>
+        <div><label>Lagerort</label><select id="m_lo" data-listkat="lagerort"><option value="">— (leer)</option></select></div>
+        <div><label>Lagerplatz</label><select id="m_lp" data-listkat="lagerplatz"><option value="">— (leer)</option></select></div>
         <div><label>Maß</label><input id="m_mass" type="text"></div>
         <div><label>Farbe</label><input id="m_farbe" type="text"></div>
         <div><label>Einheit</label><input id="m_einheit" type="text" placeholder="z. B. Stück, lfm, m²"></div>
@@ -1158,6 +1158,7 @@ async function loadListen(){
   const box=$("listenBox"); box.innerHTML='<div class="small muted">lädt…</div>';
   try{ await loadListenData(); }
   catch(e){ box.innerHTML='<div class="small" style="color:var(--warn)">Listen-Tabelle nicht erreichbar. Wurde <code>stammdaten-liste-setup.sql</code> ausgeführt?</div>'; return; }
+  fillManualSelects();   // Dropdowns im manuellen Anlegen mit neuen Werten aktualisieren
   if(!STAMM.loaded){ try{ await loadStamm(); }catch(e){} }
   box.innerHTML = LISTEN_KATS.map(([kat,label])=>{
     const items=LISTEN[kat]||[];
@@ -1268,6 +1269,14 @@ function fillBulkSelects(){
   const wg=$("bulkWg"), lo=$("bulkLo");
   if(wg) wg.innerHTML='<option value="">— Warengruppe wählen —</option>'+(LISTEN.warengruppe||[]).map(x=>'<option value="'+esc(x.wert)+'">'+esc(x.wert)+'</option>').join("");
   if(lo) lo.innerHTML='<option value="">— Lagerort wählen —</option>'+(LISTEN.lagerort||[]).map(x=>'<option value="'+esc(x.wert)+'">'+esc(x.wert)+'</option>').join("");
+}
+/* Dropdowns (Warengruppe/Lagerort/Lagerplatz) im manuellen Anlege-Formular aus den Listen befüllen */
+function fillManualSelects(){
+  [["m_wg","warengruppe"],["m_lo","lagerort"],["m_lp","lagerplatz"]].forEach(([id,kat])=>{
+    const s=$(id); if(!s) return;
+    const v = (s.value && s.value!=="__new__") ? s.value : "";
+    s.innerHTML=listSelectOptions(kat, v); s.value=v; s.dataset.prev=v;
+  });
 }
 $("bgReload").addEventListener("click", loadBaugruppen);
 $("bgNew").addEventListener("click", ()=>newBaugruppe());
@@ -1881,7 +1890,7 @@ async function bgSavePrice(){
 /* ---------- Init ---------- */
 document.addEventListener("change", e=>{ const s=e.target; if(s && s.tagName==="SELECT" && s.dataset && s.dataset.listkat!=null) onListSelectChange(s); });
 setMode("eingang");
-loadListenData().catch(()=>{});
+loadListenData().then(fillManualSelects).catch(()=>{});
 loadStamm().then(loadEingang);
 </script>
 </body>
