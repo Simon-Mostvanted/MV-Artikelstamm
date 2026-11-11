@@ -296,6 +296,12 @@ $("items").addEventListener("click",e=>{
 ping();
 loadAllArticles();   // Artikel-Cache für die Suche vorladen
 loadDruckliste();
+// Cache aktualisieren, sobald man zur Seite zurückkehrt (z. B. nach dem Archivieren im Artikelstamm)
+document.addEventListener("visibilitychange", async ()=>{
+  if(document.hidden) return;
+  await loadAllArticles();
+  if($("search").value.trim()) search();   // falls eine Suche offen ist, mit frischem Stand neu rendern
+});
 </script>
 </body>
 </html>
