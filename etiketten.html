@@ -18,6 +18,20 @@
   .dot{width:9px;height:9px;border-radius:50%;display:inline-block;margin-right:5px}
   .dot.on{background:var(--ok)}.dot.off{background:var(--warn)}.dot.err{background:var(--bad)}
   main{max-width:1100px;margin:0 auto;padding:18px 16px 60px}
+  /* Artikel-Vorschau rechts */
+  #previewPane{position:fixed;top:54px;right:0;bottom:0;width:340px;background:var(--panel);border-left:1px solid var(--line);overflow-y:auto;z-index:15;box-shadow:-6px 0 22px rgba(0,0,0,.4)}
+  #previewPane.hidden{display:none}
+  .pvHead{position:sticky;top:0;background:var(--panel2);display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border-bottom:1px solid var(--line)}
+  .pvHead b{font-size:13px}
+  .pvHead button{background:transparent;border:1px solid var(--line2);color:var(--muted);border-radius:7px;padding:3px 9px;cursor:pointer;font-size:12.5px}
+  .pvBody{padding:12px 14px}
+  .pvTitle{font-size:17px;font-weight:700;margin-bottom:10px}
+  .pvRow{display:flex;gap:10px;padding:6px 0;border-bottom:1px solid rgba(148,163,184,.12);font-size:12.5px}
+  .pvRow .k{color:var(--muted);flex:0 0 118px}
+  .pvRow .v{color:var(--text);word-break:break-word;flex:1}
+  .pvEmpty{color:var(--muted);font-size:12.5px}
+  body.pv-open main{margin-left:auto;margin-right:360px}
+  @media(max-width:900px){ #previewPane{width:100%;top:0;z-index:40} body.pv-open main{margin-right:auto} }
   .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px;margin-bottom:16px}
   .card h2{margin:0 0 4px;font-size:15px}
   .card .sub{color:var(--muted);font-size:12px;margin-bottom:12px}
@@ -122,6 +136,11 @@
   <div id="sheet"></div>
 </main>
 
+<aside id="previewPane" class="hidden no-print">
+  <div class="pvHead"><b>🔍 Artikel-Vorschau</b><button type="button" id="pvClose">✕ schließen</button></div>
+  <div class="pvBody" id="pvBody"></div>
+</aside>
+
 <script>
 const SUPABASE_URL="https://vmxucwenjpwrjpeqcuhc.supabase.co";
 const SUPABASE_KEY="sb_publishable_bKycBdawzkSItE7G0YVamQ_ikkJMm0j";
@@ -147,7 +166,7 @@ async function loadAllArticles(){
     let all=[],from=0,page=1000;
     while(true){
       const { data, error } = await db.from("artikel")
-        .select("mv_code,mv_nr,bezeichnung,mass,lagerort,art_nr_lieferant,art_nr_hersteller,hersteller,lieferant,farbe,alias")
+        .select("*")
         .eq("aktiv",true).order("mv_nr",{ascending:true}).range(from,from+page-1);
       if(error) throw error;
       all=all.concat(data||[]);
@@ -182,6 +201,19 @@ function searchArticles(q){
   scored.sort((x,y)=>y.score-x.score);
   return scored.map(s=>s.a);
 }
+/* ---------- Artikel-Vorschau (rechtes Panel) ---------- */
+const PV_FIELDS=[["Bezeichnung","bezeichnung"],["Interne Bez./Suchbegriffe","alias"],["Größe/Maß","mass"],["Farbe","farbe"],["Lieferant","lieferant"],["Hersteller","hersteller"],["Art.nr Lieferant","art_nr_lieferant"],["Art.nr Hersteller/EAN","art_nr_hersteller"],["Warengruppe","warengruppe"],["Lagerort","lagerort"],["Lagerplatz","lagerplatz"],["Einheit","einheit"],["VPE-Größe","vpe_menge"],["EK (exkl.)","ek_exkl"],["VK (inkl.)","vk_inkl"],["Gewicht (kg)","gewicht_kg"],["Bestellweg","bestellweg"],["Bestell-Mail","bestell_mail"],["Produktlink","produktlink"]];
+function pvVal(key,v){ if(key==="produktlink") return `<a href="${esc(v)}" target="_blank" style="color:var(--accent);word-break:break-all">${esc(v)}</a>`; return esc(v); }
+function showPreview(mvCode){
+  const a = ALLART.find(x=>x.mv_code===mvCode) || LIST.find(x=>x.mv_code===mvCode);
+  if(!a){ toast("Keine Daten gefunden – bitte Suche neu laden.",true); return; }
+  const rows = PV_FIELDS.map(([label,key])=>{ const v=a[key]; if(v==null||v==="") return ""; return `<div class="pvRow"><span class="k">${esc(label)}</span><span class="v">${pvVal(key,v)}</span></div>`; }).filter(Boolean).join("");
+  $("pvBody").innerHTML = `<div class="pvTitle">${esc(a.mv_code||"")}</div>` + (rows || `<div class="pvEmpty">Keine weiteren Daten.</div>`);
+  $("previewPane").classList.remove("hidden");
+  document.body.classList.add("pv-open");
+}
+function closePreview(){ $("previewPane").classList.add("hidden"); document.body.classList.remove("pv-open"); }
+$("pvClose").addEventListener("click", closePreview);
 async function search(){
   const q=$("search").value.trim(); if(!q){ $("results").innerHTML=""; return; }
   if(!ALLART_LOADED){ $("results").innerHTML='<div class="muted small">lädt…</div>'; await loadAllArticles(); }
@@ -189,28 +221,30 @@ async function search(){
   const have=seen();
   $("results").innerHTML = hits.length ? hits.map(a=>{
     const inList=have.has(a.mv_code);
-    return `<div class="r"><b style="min-width:78px">${esc(a.mv_code)}</b><span class="g">${esc(a.bezeichnung||"")} <span class="muted">· ${esc(a.lieferant||"")}${a.hersteller?" · "+esc(a.hersteller):""}${a.farbe?" · "+esc(a.farbe):""}${a.mass?" · "+esc(a.mass):""}${a.art_nr_lieferant?" · "+esc(a.art_nr_lieferant):""}</span></span>`+
+    const det=[a.mass,a.farbe,a.lieferant].filter(Boolean).map(esc).join(" · ");
+    return `<div class="r" data-prev="${esc(a.mv_code)}" style="cursor:pointer" title="Für Vorschau anklicken"><b style="min-width:78px">${esc(a.mv_code)}</b><span class="g">${esc(a.bezeichnung||"")}${det?` <span class="muted">· ${det}</span>`:""}</span>`+
       (inList?`<span class="muted small">✓ in Liste</span>`:`<button class="btn" data-add='${esc(a.mv_code)}' style="padding:4px 10px">+ hinzufügen</button>`)+`</div>`;
   }).join("") : `<div class="muted small">Keine Treffer.</div>`;
-  $("results").querySelectorAll("button[data-add]").forEach(b=>b.addEventListener("click",()=>{ addByCode(b.dataset.add); }));
+  $("results").querySelectorAll(".r[data-prev]").forEach(r=>r.addEventListener("click",()=>showPreview(r.dataset.prev)));
+  $("results").querySelectorAll("button[data-add]").forEach(b=>b.addEventListener("click",e=>{ e.stopPropagation(); addByCode(b.dataset.add); }));
 }
 async function addByCode(code){
   if(seen().has(code)) return;
-  const { data } = await db.from("artikel").select("mv_code,bezeichnung,mass,lagerort").eq("mv_code",code).limit(1);
+  const { data } = await db.from("artikel").select("mv_code,bezeichnung,mass,lagerort,farbe").eq("mv_code",code).limit(1);
   if(data&&data[0]){ LIST.push(data[0]); render(); }
 }
 async function addManyCodes(codes){
   const uniq=[...new Set(codes.map(c=>c.trim()).filter(Boolean))].filter(c=>!seen().has(c));
   if(!uniq.length){ toast("Keine neuen Codes.",true); return; }
   for(let i=0;i<uniq.length;i+=200){
-    const { data } = await db.from("artikel").select("mv_code,bezeichnung,mass,lagerort").in("mv_code",uniq.slice(i,i+200));
+    const { data } = await db.from("artikel").select("mv_code,bezeichnung,mass,lagerort,farbe").in("mv_code",uniq.slice(i,i+200));
     (data||[]).forEach(a=>{ if(!seen().has(a.mv_code)) LIST.push(a); });
   }
   render(); toast(LIST.length+" Etiketten in der Liste");
 }
 async function loadQueue(){
   const { data, error } = await db.from("artikel")
-    .select("mv_code,bezeichnung,mass,lagerort")
+    .select("mv_code,bezeichnung,mass,lagerort,farbe")
     .eq("etikettiert",false).or("etikett_typ.is.null,etikett_typ.neq.kein")
     .order("mv_nr",{ascending:true}).limit(250);
   if(error){ toast("Fehler: "+error.message,true); return; }
@@ -220,12 +254,12 @@ async function loadQueue(){
 
 function labelHTML(a,svgId){
   const infos=[];
-  if(a.lagerort) infos.push(esc(a.lagerort));
+  if(a.mass)  infos.push(esc(a.mass));
+  if(a.farbe) infos.push(esc(a.farbe));
   return `<div class="label">
     <div class="logoCol"><img src="${MV_LOGO}" alt=""></div>
     <div class="txtCol">
       <div class="bez">${esc(a.bezeichnung||"")}</div>
-      ${a.mass?`<div class="mass">${esc(a.mass)}</div>`:""}
       ${infos.length?`<div class="info">${infos.join(" · ")}</div>`:""}
     </div>
     <div class="bcCol"><svg id="${svgId}"></svg><span class="code">${esc(a.mv_code||"")}</span></div>
@@ -234,7 +268,7 @@ function labelHTML(a,svgId){
 function itemsHTML(){
   if(!LIST.length) return `<div class="muted small">Liste ist leer.</div>`;
   return LIST.map((a,i)=>
-    `<div class="qrow"><b class="qcode">${esc(a.mv_code||"")}</b>`+
+    `<div class="qrow" data-prev="${esc(a.mv_code||"")}" title="Für Vorschau anklicken"><b class="qcode">${esc(a.mv_code||"")}</b>`+
     `<span class="qbez">${esc(a.bezeichnung||"")}</span>`+
     `<span class="qn">Stück ×<input type="number" min="1" max="199" value="${parseInt(a.menge,10)||1}" data-i="${i}" class="qmenge"></span>`+
     `<button class="btn ghost qx" data-i="${i}" title="Aus der Liste entfernen">✕</button></div>`
@@ -287,10 +321,15 @@ $("items").addEventListener("input",e=>{
   if(LIST[i].queueId){ db.from("druckliste").update({menge:v}).eq("id",LIST[i].queueId).then(()=>{},()=>{}); }
 });
 $("items").addEventListener("click",e=>{
-  const x=e.target.closest(".qx"); if(!x) return;
-  const i=+x.dataset.i; const it=LIST[i]; if(!it) return;
-  LIST.splice(i,1); render();
-  if(it.queueId){ db.from("druckliste").delete().eq("id",it.queueId).then(()=>{},()=>{}); }   // auch zentral entfernen
+  const x=e.target.closest(".qx");
+  if(x){
+    const i=+x.dataset.i; const it=LIST[i]; if(!it) return;
+    LIST.splice(i,1); render();
+    if(it.queueId){ db.from("druckliste").delete().eq("id",it.queueId).then(()=>{},()=>{}); }   // auch zentral entfernen
+    return;
+  }
+  if(e.target.closest(".qmenge")) return;                 // Mengen-Eingabe nicht abfangen
+  const row=e.target.closest(".qrow"); if(row&&row.dataset.prev) showPreview(row.dataset.prev);
 });
 
 ping();
