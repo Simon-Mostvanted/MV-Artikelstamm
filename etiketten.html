@@ -74,6 +74,7 @@
   .label .bcCol{flex:0 0 22mm;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.4mm}
   .label .bcCol svg{height:7.4mm;width:auto;max-width:22mm}
   .label .code{font-weight:600;font-size:2.1mm;letter-spacing:.05mm}
+  @media screen{ .label{cursor:pointer} .label:hover{outline:2px solid #2563eb} }
 
   @media print{
     @page{ size:62mm 18mm; margin:0; }
@@ -256,7 +257,7 @@ function labelHTML(a,svgId){
   const infos=[];
   if(a.mass)  infos.push(esc(a.mass));
   if(a.farbe) infos.push(esc(a.farbe));
-  return `<div class="label">
+  return `<div class="label" data-prev="${esc(a.mv_code||"")}" title="Für Vorschau anklicken">
     <div class="logoCol"><img src="${MV_LOGO}" alt=""></div>
     <div class="txtCol">
       <div class="bez">${esc(a.bezeichnung||"")}</div>
@@ -330,6 +331,10 @@ $("items").addEventListener("click",e=>{
   }
   if(e.target.closest(".qmenge")) return;                 // Mengen-Eingabe nicht abfangen
   const row=e.target.closest(".qrow"); if(row&&row.dataset.prev) showPreview(row.dataset.prev);
+});
+// Klick auf eine Etiketten-Kachel (Druckvorschau) -> Artikel-Vorschau rechts öffnen
+$("sheet").addEventListener("click",e=>{
+  const lab=e.target.closest(".label"); if(lab&&lab.dataset.prev) showPreview(lab.dataset.prev);
 });
 
 ping();
