@@ -167,16 +167,16 @@
       <div style="margin-top:12px;display:grid;grid-template-columns:1fr 1fr;gap:10px">
         <div style="grid-column:1/-1"><label>Bezeichnung *</label><input id="m_bez" type="text" placeholder="Pflichtfeld"></div>
         <div style="grid-column:1/-1"><label>Interne Bezeichnung / Suchbegriffe</label><input id="m_alias" type="text" placeholder="z. B. C-Schiene (macht den Artikel leichter auffindbar)"></div>
-        <div><label>Lieferant</label><input id="m_lief" type="text"></div>
+        <div><label>Lieferant</label><select id="m_lief" data-listkat="lieferant"><option value="">— (leer)</option></select></div>
         <div><label>Art.nr. Lieferant</label><input id="m_anrl" type="text"></div>
-        <div><label>Hersteller</label><input id="m_herst" type="text"></div>
+        <div><label>Hersteller</label><select id="m_herst" data-listkat="hersteller"><option value="">— (leer)</option></select></div>
         <div><label>Art.nr. Hersteller / EAN</label><input id="m_anrh" type="text"></div>
         <div><label>Warengruppe</label><select id="m_wg" data-listkat="warengruppe"><option value="">— (leer)</option></select></div>
         <div><label>Lagerort</label><select id="m_lo" data-listkat="lagerort"><option value="">— (leer)</option></select></div>
         <div><label>Lagerplatz</label><select id="m_lp" data-listkat="lagerplatz"><option value="">— (leer)</option></select></div>
         <div><label>Maß</label><input id="m_mass" type="text"></div>
         <div><label>Farbe</label><input id="m_farbe" type="text"></div>
-        <div><label>Einheit</label><input id="m_einheit" type="text" placeholder="z. B. Stück, lfm, m²"></div>
+        <div><label>Einheit</label><select id="m_einheit" data-listkat="einheit"><option value="">— (leer)</option></select></div>
         <div><label>VPE-Größe</label><input id="m_vpe_menge" type="text" placeholder="z. B. 1, 200"></div>
         <div><label>EK (exkl.)</label><input id="m_ek" type="text"></div>
         <div><label>VK (inkl.)</label><input id="m_vk" type="text"></div>
@@ -1084,6 +1084,15 @@ $("commitBtn").addEventListener("click", async ()=>{
     inserted.sort((a,b)=>(a.mv_code>b.mv_code?1:-1));
     showResult(inserted);
     toast(inserted.length+" Artikel angelegt – MV-Nummern vergeben ✓");
+    // neue Lieferanten/Hersteller/Einheiten in die Stammdaten-Listen übernehmen (z. B. aus der Rechnungsauslese)
+    try{
+      let added=false;
+      for(const k of ["lieferant","hersteller","einheit"]){
+        const vals=[...new Set(NEWROWS.map(r=>clean(r[k])).filter(Boolean))];
+        for(const v of vals){ if(!(LISTEN[k]||[]).some(x=>x.wert===v)){ if(await listAddValue(k,v,true)) added=true; } }
+      }
+      if(added){ ["lieferant","hersteller","einheit"].forEach(refreshListSelects); fillManualSelects(); }
+    }catch(e){}
     await loadStamm(); // Stamm aktualisieren (nächste Nummer etc.)
     NEWROWS=[]; renderSummary(); renderNewTable(); updateCommitUI(); // angelegte Zeilen aus der Anlege-Tabelle entfernen
     checkEingangComplete(); // 3a: aus einer Rechnung heraus angelegt -> zurück zur Liste, wenn nichts mehr offen
@@ -1138,16 +1147,16 @@ $("tabListen").addEventListener("click", ()=>{ setMode("listen"); loadListen(); 
 $("listenReload").addEventListener("click", loadListen);
 
 /* ============ Stammdaten-Listen (Dropdown-Werte verwalten) ============ */
-let LISTEN = { warengruppe:[], lagerort:[], lagerplatz:[] };
-const LISTEN_KATS = [["warengruppe","Warengruppe"],["lagerort","Lagerort"],["lagerplatz","Lagerplatz"]];
+const LISTEN_KATS = [["warengruppe","Warengruppe"],["lagerort","Lagerort"],["lagerplatz","Lagerplatz"],["lieferant","Lieferant"],["hersteller","Hersteller"],["einheit","Einheit"]];
+let LISTEN = {}; LISTEN_KATS.forEach(([k])=>LISTEN[k]=[]);
 async function loadListenData(){
   const { data, error } = await db.from("stammdaten_liste").select("*").eq("aktiv",true)
     .order("kategorie",{ascending:true}).order("sortierung",{ascending:true}).order("wert",{ascending:true});
   if(error) throw error;
-  LISTEN={warengruppe:[],lagerort:[],lagerplatz:[]};
+  LISTEN={}; LISTEN_KATS.forEach(([k])=>LISTEN[k]=[]);
   (data||[]).forEach(r=>{ (LISTEN[r.kategorie]=LISTEN[r.kategorie]||[]).push(r); });
   // Alle Listen alphabetisch (natürlich) sortieren
-  ["warengruppe","lagerort","lagerplatz"].forEach(k=>{ if(LISTEN[k]) LISTEN[k].sort((a,b)=>String(a.wert).localeCompare(String(b.wert),"de",{sensitivity:"base",numeric:true})); });
+  Object.keys(LISTEN).forEach(k=>{ LISTEN[k].sort((a,b)=>String(a.wert).localeCompare(String(b.wert),"de",{sensitivity:"base",numeric:true})); });
   return LISTEN;
 }
 function countUsage(kat, wert){
@@ -1170,14 +1179,16 @@ async function loadListen(){
         "<button class='btn ghost' data-del='"+kat+":"+it.id+"' style='padding:3px 10px'>löschen</button>"+
       "</div>";
     }).join("");
-    return "<div class='card'>"+
-      "<h2 style='font-size:16px;margin:0 0 8px'>"+label+" <span class='small muted'>("+items.length+")</span></h2>"+
-      "<div class='row' style='gap:6px;margin-bottom:10px'>"+
-        "<input id='add_"+kat+"' type='text' placeholder='Neuer Wert…' style='max-width:280px'>"+
-        "<button class='btn ok' data-add='"+kat+"' style='padding:4px 12px'>＋ Hinzufügen</button>"+
+    return "<details class='card' style='margin-bottom:10px'>"+
+      "<summary style='cursor:pointer;font-weight:600;font-size:16px'>"+esc(label)+" <span class='small muted'>("+items.length+")</span></summary>"+
+      "<div style='margin-top:12px'>"+
+        "<div class='row' style='gap:6px;margin-bottom:10px'>"+
+          "<input id='add_"+kat+"' type='text' placeholder='Neuer Wert…' style='max-width:280px'>"+
+          "<button class='btn ok' data-add='"+kat+"' style='padding:4px 12px'>＋ Hinzufügen</button>"+
+        "</div>"+
+        "<div style='max-height:420px;overflow-y:auto'>"+(rows||"<div class='small muted'>Noch keine Werte.</div>")+"</div>"+
       "</div>"+
-      "<div style='max-height:420px;overflow-y:auto'>"+(rows||"<div class='small muted'>Noch keine Werte.</div>")+"</div>"+
-    "</div>";
+    "</details>";
   }).join("");
   box.querySelectorAll("button[data-add]").forEach(b=>b.addEventListener("click",()=>listenAdd(b.dataset.add)));
   box.querySelectorAll("input[id^='add_']").forEach(inp=>inp.addEventListener("keydown",e=>{ if(e.key==="Enter") listenAdd(inp.id.slice(4)); }));
@@ -1221,7 +1232,7 @@ async function listenDelete(kat, id){
 }
 
 /* ----- Dropdown-Auswahlfelder (Warengruppe/Lagerort/Lagerplatz) ----- */
-function katLabel(kat){ const m={warengruppe:"Warengruppe",lagerort:"Lagerort",lagerplatz:"Lagerplatz"}; return m[kat]||kat; }
+function katLabel(kat){ const m=Object.fromEntries(LISTEN_KATS); return m[kat]||kat; }
 function listSelectOptions(kat, current){
   const items=(LISTEN[kat]||[]).map(x=>x.wert);
   const cur=current==null?"":String(current);
@@ -1235,15 +1246,16 @@ function listSelectHtml(kat, current, attrs){
   const cur=current==null?"":String(current);
   return '<select data-listkat="'+kat+'" data-prev="'+esc(cur)+'" '+(attrs||"")+'>'+listSelectOptions(kat,cur)+'</select>';
 }
-async function listAddValue(kat, wert){
+async function listAddValue(kat, wert, silent){
   if((LISTEN[kat]||[]).some(x=>x.wert===wert)) return true;
   try{
     const maxSort=Math.max(0,...(LISTEN[kat]||[]).map(x=>x.sortierung||0));
     const { data, error } = await db.from("stammdaten_liste").insert({kategorie:kat,wert,sortierung:maxSort+1}).select("*").single();
     if(error) throw error;
     (LISTEN[kat]=LISTEN[kat]||[]).push(data);
-    toast("Wert hinzugefügt: "+wert); return true;
-  }catch(e){ toast(/duplicate|unique/i.test(e.message||"")?"Wert existiert bereits.":"Fehler: "+(e.message||e), true); return false; }
+    if(!silent) toast("Wert hinzugefügt: "+wert);
+    return true;
+  }catch(e){ if(!silent) toast(/duplicate|unique/i.test(e.message||"")?"Wert existiert bereits.":"Fehler: "+(e.message||e), true); return false; }
 }
 function refreshListSelects(kat){
   document.querySelectorAll('select[data-listkat="'+kat+'"]').forEach(s=>{
@@ -1272,7 +1284,7 @@ function fillBulkSelects(){
 }
 /* Dropdowns (Warengruppe/Lagerort/Lagerplatz) im manuellen Anlege-Formular aus den Listen befüllen */
 function fillManualSelects(){
-  [["m_wg","warengruppe"],["m_lo","lagerort"],["m_lp","lagerplatz"]].forEach(([id,kat])=>{
+  [["m_wg","warengruppe"],["m_lo","lagerort"],["m_lp","lagerplatz"],["m_lief","lieferant"],["m_herst","hersteller"],["m_einheit","einheit"]].forEach(([id,kat])=>{
     const s=$(id); if(!s) return;
     const v = (s.value && s.value!=="__new__") ? s.value : "";
     s.innerHTML=listSelectOptions(kat, v); s.value=v; s.dataset.prev=v;
