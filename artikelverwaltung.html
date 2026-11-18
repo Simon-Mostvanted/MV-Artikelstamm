@@ -314,6 +314,12 @@ function norm(v){ return String(v==null?"":v).replace(/\s+/g," ").trim().toLower
 /* Artikelnummer-Vergleich: Leerzeichen und Trenner (. - _ /) ignorieren, damit z. B. "058701 120" = "058701120" (Würth). */
 function normArt(v){ return norm(v).replace(/[\s.\-_/]/g,""); }
 function clean(v){ let s=String(v==null?"":v).replace(/\s+/g," ").trim(); return (s==="k.A."||s==="-")?"":s; }
+/* Einheiten-Synonyme vereinheitlichen (gilt für manuelle PDFs UND die Apps-Script-Auslese,
+   da alle neuen Artikel durch makeNewRow laufen). lfm -> m; STK/ST/Pcs -> Stück; Pack -> Packung. */
+const EINHEIT_CANON = { "lfm":"m","laufmeter":"m","laufender meter":"m","laufende meter":"m",
+  "stk":"Stück","st":"Stück","stck":"Stück","stück":"Stück","stueck":"Stück","pcs":"Stück","pc":"Stück",
+  "pack":"Packung","packung":"Packung" };
+function canonEinheit(v){ const s=clean(v); if(!s) return s; const k=s.toLowerCase().replace(/\./g,""); return EINHEIT_CANON[k]||s; }
 function parseNum(v){ if(v==null) return null; let s=String(v).trim(); if(s==="") return null;
   s=s.replace(/[^\d.,-]/g,""); if(s==="") return null;
   if(/,\d+$/.test(s)&&/\./.test(s)) s=s.replace(/\./g,"").replace(",","."); else s=s.replace(",",".");
@@ -705,7 +711,7 @@ function makeNewRow(c){
     bezeichnung:c.bezeichnung, alias:(c.alias||""), lieferant:c.lieferant,
     art_nr_lieferant:c.art_nr_lieferant, art_nr_hersteller:c.art_nr_hersteller,
     hersteller:c.hersteller, warengruppe:c.warengruppe||"", lagerort:c.lagerort||"", lagerplatz:c.lagerplatz||"",
-    mass:c.mass, farbe:c.farbe, einheit:(c.einheit||"Stück"), vpe_menge:(c.vpe_menge!=null&&c.vpe_menge!==""?c.vpe_menge:1),
+    mass:c.mass, farbe:c.farbe, einheit:(canonEinheit(c.einheit)||"Stück"), vpe_menge:(c.vpe_menge!=null&&c.vpe_menge!==""?c.vpe_menge:1),
     ek_exkl:c.ek_exkl, vk_inkl:(c.vk_inkl!=null?c.vk_inkl:null),
     bestell_mail:c.bestell_mail||"", produktlink:c.produktlink||"",
     bestellweg:(c.bestellweg||""), etikett_typ: w?"kein":"",
